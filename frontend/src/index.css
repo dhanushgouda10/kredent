@@ -1,0 +1,95 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap');
+@import 'tailwindcss';
+
+/*
+  Design tokens.
+
+  NOTE: the codebase historically used two slightly different navy values
+  (#0b2c5f in this theme vs #062B63 inline in most pages) and two oranges
+  (#f5a623 here vs #F7941D inline). This consolidates both onto the shade
+  actually seen on screen across the app (#062B63 / #F7941D), so the palette
+  is internally consistent. This is NOT a new theme — it's the same brand
+  colors the app already uses everywhere, just applied consistently.
+*/
+@theme {
+  --color-kredent-navy: #062b63;
+  --color-kredent-navy-deep: #082a5e;
+  --color-kredent-navy-dark: #052354;
+  --color-kredent-blue: #123a7a;
+  --color-kredent-accent: #f7941d;
+  --color-kredent-accent-dark: #e6851c;
+  --font-serif: 'Playfair Display', serif;
+  --font-sans: 'Inter', 'Open Sans', sans-serif;
+  --shadow-card: 0 1px 2px rgba(15, 32, 66, 0.04), 0 8px 24px rgba(15, 32, 66, 0.08);
+  --shadow-card-hover: 0 4px 10px rgba(15, 32, 66, 0.06), 0 16px 36px rgba(15, 32, 66, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: #122746;
+  background: #f4f6fb;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.heading-serif {
+  font-family: var(--font-serif);
+}
+
+.premium-shadow {
+  box-shadow: var(--shadow-card);
+}
+
+.hero-overlay {
+  background: linear-gradient(110deg, rgba(9, 38, 82, 0.95), rgba(9, 38, 82, 0.75));
+}
+
+.hover-glow:hover {
+  box-shadow: 0 10px 24px rgba(245, 166, 35, 0.35);
+}
+
+/* Accessible, consistent keyboard focus across the whole app. Tailwind's
+   default outline is removed by many browsers' reset styles, so custom
+   interactive elements (divs-as-buttons, styled links, etc.) can otherwise
+   end up with no visible focus indicator at all. */
+:focus-visible {
+  outline: 2px solid var(--color-kredent-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Respect motion preferences instead of forcing animations on everyone. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: shimmer 1.6s infinite;
+}

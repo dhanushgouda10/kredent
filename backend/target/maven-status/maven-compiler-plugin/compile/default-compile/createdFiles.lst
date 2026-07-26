@@ -1,0 +1,9 @@
+com/kredent/backend/repository/StudentRepository.class
+com/kredent/backend/config/CorsConfig.class
+com/kredent/backend/dto/RegisterRequest.class
+com/kredent/backend/dto/LoginRequest.class
+com/kredent/backend/model/Student.class
+com/kredent/backend/KredentBackendApplication.class
+com/kredent/backend/config/JdbcUrlEnvironmentPostProcessor.class
+com/kredent/backend/service/AuthService.class
+com/kredent/backend/controller/AuthController.class

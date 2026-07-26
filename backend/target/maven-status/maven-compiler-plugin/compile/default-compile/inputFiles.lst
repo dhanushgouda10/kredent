@@ -1,0 +1,9 @@
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/config/CorsConfig.java
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/model/Student.java
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/repository/StudentRepository.java
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/config/JdbcUrlEnvironmentPostProcessor.java
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/KredentBackendApplication.java
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/dto/RegisterRequest.java
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/dto/LoginRequest.java
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/service/AuthService.java
+/Users/dhanushgowda/Desktop/kredent 2/backend/src/main/java/com/kredent/backend/controller/AuthController.java
