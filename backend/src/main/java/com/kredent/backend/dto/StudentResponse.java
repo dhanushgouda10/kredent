@@ -4,7 +4,12 @@ import com.kredent.backend.entity.Student;
 
 import java.time.LocalDateTime;
 
-/** Never return the Student entity directly — it (correctly) still carries the password hash field. */
+/**
+ * Never return the Student entity directly — it (correctly) still carries the password hash
+ * field, AND (Phase 3) the encrypted wallet private key. walletAddress (public, safe) is
+ * included below; walletPrivateKeyEncrypted is deliberately never referenced anywhere in this
+ * class.
+ */
 public class StudentResponse {
 
     private Long id;
@@ -14,6 +19,7 @@ public class StudentResponse {
     private String phone;
     private String department;
     private LocalDateTime createdAt;
+    private String walletAddress;
 
     public static StudentResponse from(Student student) {
         StudentResponse dto = new StudentResponse();
@@ -24,6 +30,7 @@ public class StudentResponse {
         dto.phone = student.getPhone();
         dto.department = student.getDepartment();
         dto.createdAt = student.getCreatedAt();
+        dto.walletAddress = student.getWalletAddress();
         return dto;
     }
 
@@ -81,5 +88,13 @@ public class StudentResponse {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getWalletAddress() {
+        return walletAddress;
+    }
+
+    public void setWalletAddress(String walletAddress) {
+        this.walletAddress = walletAddress;
     }
 }

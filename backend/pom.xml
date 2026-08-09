@@ -60,6 +60,16 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- Phase 3 (blockchain): used ONLY for (1) generating a student's system-managed
+             wallet keypair locally (WalletService) and (2) read-only RPC calls to verify a
+             transaction receipt after the admin's MetaMask has already signed and submitted it
+             (BlockchainVerificationService). The backend never uses web3j to sign or submit a
+             transaction itself, and never holds an admin private key. -->
+        <dependency>
+            <groupId>org.web3j</groupId>
+            <artifactId>core</artifactId>
+            <version>4.10.3</version>
+        </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>

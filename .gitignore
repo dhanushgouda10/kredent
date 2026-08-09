@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Environment files (frontend/.env, any future backend .env) — never commit these.
+# blockchain/.env is additionally covered by blockchain/.gitignore.
+.env
+.env.local
+.env.*.local
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

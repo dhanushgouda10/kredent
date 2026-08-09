@@ -39,6 +39,20 @@ public class Student {
     @JsonIgnore
     private String password;
 
+    // System-managed wallet (Phase 3, "Option B"). Generated once, automatically, the moment
+    // this row is first created — see WalletService + AuthService.register /
+    // StudentService.adminCreateStudent. Public address, safe to return in API responses.
+    @Column(name = "wallet_address", unique = true)
+    private String walletAddress;
+
+    // AES-256-GCM encrypted (see WalletService), Base64-encoded. This is the ONLY place the
+    // student's private key exists outside the moment it was generated. @JsonIgnore is a
+    // second layer of defense — no StudentResponse field ever reads this getter anyway, so it
+    // can never leave the backend via an API response even if a DTO mapping mistake happened.
+    @Column(name = "wallet_private_key_encrypted", length = 1024)
+    @JsonIgnore
+    private String walletPrivateKeyEncrypted;
+
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -109,5 +123,21 @@ public class Student {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getWalletAddress() {
+        return walletAddress;
+    }
+
+    public void setWalletAddress(String walletAddress) {
+        this.walletAddress = walletAddress;
+    }
+
+    public String getWalletPrivateKeyEncrypted() {
+        return walletPrivateKeyEncrypted;
+    }
+
+    public void setWalletPrivateKeyEncrypted(String walletPrivateKeyEncrypted) {
+        this.walletPrivateKeyEncrypted = walletPrivateKeyEncrypted;
     }
 }

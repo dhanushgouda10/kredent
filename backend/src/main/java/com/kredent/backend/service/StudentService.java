@@ -27,16 +27,19 @@ public class StudentService {
     private final PasswordEncoder passwordEncoder;
     private final CurrentUserService currentUserService;
     private final AuditLogService auditLogService;
+    private final WalletService walletService;
 
     public StudentService(
             StudentRepository studentRepository,
             PasswordEncoder passwordEncoder,
             CurrentUserService currentUserService,
-            AuditLogService auditLogService) {
+            AuditLogService auditLogService,
+            WalletService walletService) {
         this.studentRepository = studentRepository;
         this.passwordEncoder = passwordEncoder;
         this.currentUserService = currentUserService;
         this.auditLogService = auditLogService;
+        this.walletService = walletService;
     }
 
     public StudentResponse getOwnProfile() {
@@ -79,6 +82,13 @@ public class StudentService {
         student.setPhone(request.getPhone());
         student.setDepartment(request.getDepartment());
         student.setPassword(passwordEncoder.encode(request.getPassword()));
+
+        // Same system-managed wallet generation as self-registration (AuthService.register) —
+        // an admin creating a student directly gets the same Option B wallet behavior.
+        WalletService.GeneratedWallet wallet = walletService.generateWallet();
+        student.setWalletAddress(wallet.getAddress());
+        student.setWalletPrivateKeyEncrypted(wallet.getEncryptedPrivateKey());
+
         studentRepository.save(student);
 
         Admin admin = currentUserService.getCurrentAdmin();

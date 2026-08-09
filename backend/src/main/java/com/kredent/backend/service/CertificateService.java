@@ -2,7 +2,9 @@ package com.kredent.backend.service;
 
 import com.kredent.backend.dto.CertificateMetadataRequest;
 import com.kredent.backend.dto.CertificateResponse;
+import com.kredent.backend.dto.IssueBlockchainRequest;
 import com.kredent.backend.dto.PageResponse;
+import com.kredent.backend.dto.RevokeBlockchainRequest;
 import com.kredent.backend.dto.UpdateCertificateStatusRequest;
 import com.kredent.backend.entity.ActorType;
 import com.kredent.backend.entity.Admin;
@@ -12,6 +14,7 @@ import com.kredent.backend.entity.Student;
 import com.kredent.backend.repository.CertificateRepository;
 import com.kredent.backend.repository.StudentRepository;
 import com.kredent.backend.util.FileValidationUtil;
+import com.kredent.backend.util.HashUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -44,6 +47,7 @@ public class CertificateService {
     private final CurrentUserService currentUserService;
     private final AuditLogService auditLogService;
     private final SupabaseStorageService storageService;
+    private final BlockchainVerificationService blockchainVerificationService;
     private final long maxFileSizeBytes;
 
     public CertificateService(
@@ -52,12 +56,14 @@ public class CertificateService {
             CurrentUserService currentUserService,
             AuditLogService auditLogService,
             SupabaseStorageService storageService,
+            BlockchainVerificationService blockchainVerificationService,
             @Value("${app.certificate.max-file-size-mb:5}") long maxFileSizeMb) {
         this.certificateRepository = certificateRepository;
         this.studentRepository = studentRepository;
         this.currentUserService = currentUserService;
         this.auditLogService = auditLogService;
         this.storageService = storageService;
+        this.blockchainVerificationService = blockchainVerificationService;
         this.maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
     }
 
@@ -100,6 +106,14 @@ public class CertificateService {
         return PageResponse.from(page, CertificateResponse::from);
     }
 
+    /** Admin registry view — all certificates, optionally filtered by a search term (student name/USN/certificate number). */
+    public PageResponse<CertificateResponse> listAll(String search, Pageable pageable) {
+        Page<Certificate> page = (search == null || search.isBlank())
+                ? certificateRepository.findAll(pageable)
+                : certificateRepository.search(search.trim(), pageable);
+        return PageResponse.from(page, CertificateResponse::from);
+    }
+
     public PageResponse<CertificateResponse> getCertificatesForStudent(Long studentId, Pageable pageable) {
         if (!studentRepository.existsById(studentId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Student not found");
@@ -129,6 +143,17 @@ public class CertificateService {
                     "The file does not look like a valid PDF (failed signature check)");
         }
 
+        // The hash is computed from the exact bytes we just validated, before anything else
+        // touches them — this is the PDF's real fingerprint, independent of where it's stored.
+        String fileHash = HashUtil.sha256Hex(content);
+
+        certificateRepository.findByFileHash(fileHash).ifPresent(existing -> {
+            if (!existing.getId().equals(id)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "This exact PDF has already been uploaded for another certificate (" + existing.getCertificateNumber() + ")");
+            }
+        });
+
         String sanitizedUsn = certificate.getStudent().getUsn().replaceAll("[^A-Za-z0-9]", "");
         String objectPath = "certificates/" + sanitizedUsn + "/" + UUID.randomUUID() + ".pdf";
 
@@ -139,6 +164,7 @@ public class CertificateService {
         certificate.setOriginalFilename(file.getOriginalFilename());
         certificate.setFileSizeBytes((long) content.length);
         certificate.setMimeType(FileValidationUtil.PDF_CONTENT_TYPE);
+        certificate.setFileHash(fileHash);
         certificate.setUploadedAt(LocalDateTime.now());
         certificateRepository.save(certificate);
 
@@ -151,7 +177,8 @@ public class CertificateService {
                 id.toString(),
                 Map.of(
                         "originalFilename", String.valueOf(file.getOriginalFilename()),
-                        "fileSizeBytes", content.length
+                        "fileSizeBytes", content.length,
+                        "fileHash", fileHash
                 )
         );
 
@@ -220,6 +247,15 @@ public class CertificateService {
         if (request.getStatus() == CertificateStatus.REVOKED && (request.getReason() == null || request.getReason().isBlank())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A reason is required to revoke a certificate");
         }
+        // Once a certificate is minted on-chain, its status must stay in sync with the smart
+        // contract — this plain endpoint can't do that, so it defers to revokeOnBlockchain()
+        // below, which actually revokes on-chain first. Certificates that never got minted
+        // (still PENDING_MINT / MINT_FAILED) keep working through this endpoint exactly as
+        // they did in Phase 2 — nothing changes for that case.
+        if (request.getStatus() == CertificateStatus.REVOKED && certificate.getStatus() == CertificateStatus.MINTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This certificate is minted on-chain — use the blockchain revoke action so the on-chain record stays in sync");
+        }
 
         CertificateStatus previousStatus = certificate.getStatus();
         certificate.setStatus(request.getStatus());
@@ -247,6 +283,108 @@ public class CertificateService {
                 "CERTIFICATE",
                 id.toString(),
                 metadata
+        );
+
+        return CertificateResponse.from(certificate);
+    }
+
+    /**
+     * Records a blockchain credential that the admin's MetaMask has already issued on-chain
+     * (see frontend/src/services/blockchainService.js -> issueCredentialOnChain). This method
+     * does not talk to MetaMask and does not submit any transaction — it independently verifies
+     * the reported transaction really happened (BlockchainVerificationService), cross-checks it
+     * against data we already had (student wallet, certificate hash), and only then saves it.
+     */
+    public CertificateResponse issueOnBlockchain(UUID id, IssueBlockchainRequest request) {
+        Certificate certificate = findOrThrow(id);
+
+        if (certificate.getFileHash() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Upload the certificate PDF (and generate its hash) before issuing on the blockchain");
+        }
+        if (certificate.getStatus() == CertificateStatus.MINTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This certificate has already been issued on the blockchain");
+        }
+        if (certificate.getStatus() == CertificateStatus.REVOKED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This certificate has been revoked and cannot be reissued");
+        }
+
+        String studentWallet = certificate.getStudent().getWalletAddress();
+        if (studentWallet == null || studentWallet.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This student does not have a system-managed wallet on file");
+        }
+        if (!studentWallet.equalsIgnoreCase(request.getStudentWalletAddress())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "The wallet address used on-chain does not match this student's wallet on file");
+        }
+        if (!certificate.getFileHash().equalsIgnoreCase(request.getCertificateHash())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "The certificate hash used on-chain does not match the stored SHA-256 hash");
+        }
+
+        blockchainVerificationService.verifyContractTransaction(request.getTransactionHash());
+
+        certificate.setWalletAddress(studentWallet.toLowerCase());
+        certificate.setTokenId(request.getTokenId());
+        certificate.setContractAddress(request.getContractAddress());
+        certificate.setTxHash(request.getTransactionHash());
+        certificate.setStatus(CertificateStatus.MINTED);
+        certificate.setMintedAt(LocalDateTime.now());
+        certificateRepository.save(certificate);
+
+        Admin admin = currentUserService.getCurrentAdmin();
+        auditLogService.record(
+                ActorType.ADMIN,
+                admin.getId(),
+                "CERTIFICATE_BLOCKCHAIN_ISSUED",
+                "CERTIFICATE",
+                id.toString(),
+                Map.of(
+                        "tokenId", String.valueOf(request.getTokenId()),
+                        "transactionHash", request.getTransactionHash(),
+                        "studentWalletAddress", studentWallet
+                )
+        );
+
+        return CertificateResponse.from(certificate);
+    }
+
+    /**
+     * Records an on-chain revocation the admin's MetaMask has already submitted (see
+     * blockchainService.revokeCredentialOnChain). Only a currently MINTED certificate can be
+     * revoked this way — a certificate that was never minted just uses the plain
+     * updateStatus() path above, unchanged from Phase 2.
+     */
+    public CertificateResponse revokeOnBlockchain(UUID id, RevokeBlockchainRequest request) {
+        Certificate certificate = findOrThrow(id);
+
+        if (certificate.getStatus() != CertificateStatus.MINTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Only a certificate that is currently MINTED on-chain can be revoked on-chain");
+        }
+        if (certificate.getTokenId() == null || !certificate.getTokenId().equals(request.getTokenId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Token ID does not match this certificate's on-chain record");
+        }
+
+        blockchainVerificationService.verifyContractTransaction(request.getTransactionHash());
+
+        certificate.setStatus(CertificateStatus.REVOKED);
+        certificate.setRevokedAt(LocalDateTime.now());
+        certificate.setRevokedReason(request.getReason());
+        certificateRepository.save(certificate);
+
+        Admin admin = currentUserService.getCurrentAdmin();
+        auditLogService.record(
+                ActorType.ADMIN,
+                admin.getId(),
+                "CERTIFICATE_BLOCKCHAIN_REVOKED",
+                "CERTIFICATE",
+                id.toString(),
+                Map.of(
+                        "tokenId", String.valueOf(request.getTokenId()),
+                        "transactionHash", request.getTransactionHash(),
+                        "reason", request.getReason()
+                )
         );
 
         return CertificateResponse.from(certificate);

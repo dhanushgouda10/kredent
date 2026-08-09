@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -16,96 +17,167 @@ import {
   SkeletonStatCard,
   StatCard,
 } from '../components/ui'
+import {
+  downloadCertificateFile,
+  issueCertificateBlockchain,
+  listCertificates,
+  revokeCertificateBlockchain,
+  updateCertificateStatus,
+} from '../services/certificateService'
+import { issueCredentialOnChain, revokeCredentialOnChain } from '../services/blockchainService'
+import { BLOCK_EXPLORER_URL } from '../contracts/skillChainConfig'
 
-const mockCertificates = [
-  {
-    id: '1',
-    name: 'Aarav Rao',
-    usn: '1MJ21CS001',
-    department: 'Computer Science and Engineering',
-    year: '2025',
-    status: 'Valid',
-    degree: 'B.E. Computer Science and Engineering',
-    walletAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
-    transactionHash: '0x5cf9af434b0db73a76380383adca102f95a194d01',
-    issuedDate: '2025-03-15',
-  },
-  {
-    id: '2',
-    name: 'Nisha Iyer',
-    usn: '1MJ21EC014',
-    department: 'Electronics and Communication Engineering',
-    year: '2025',
-    status: 'Valid',
-    degree: 'B.E. Electronics and Communication Engineering',
-    walletAddress: '0x8f3d2a1b9c7e6f5d4a3b2c1d0e9f8a7b6c5d4e3',
-    transactionHash: '0x2a8f7c4e1b6d9a3f5e8c2b7d4a1f6e9c3b8d5a7',
-    issuedDate: '2025-03-14',
-  },
-  {
-    id: '3',
-    name: 'Rahul S',
-    usn: '1MJ20ME027',
-    department: 'Mechanical Engineering',
-    year: '2024',
-    status: 'Revoked',
-    degree: 'B.E. Mechanical Engineering',
-    walletAddress: '0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0',
-    transactionHash: '0x9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e',
-    issuedDate: '2024-06-20',
-  },
-  {
-    id: '4',
-    name: 'Priya Sharma',
-    usn: '1MJ21CE045',
-    department: 'Civil Engineering',
-    year: '2025',
-    status: 'Valid',
-    degree: 'B.E. Civil Engineering',
-    walletAddress: '0x3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2',
-    transactionHash: '0x7b6c5d4e3f2a1b9c8d7e6f5a4b3c2d1e0f9a8b7',
-    issuedDate: '2025-03-16',
-  },
-]
+// Certificate.status (backend enum) -> how it should read/color in this admin UI.
+const STATUS_META = {
+  PENDING_MINT: { label: 'Pending Mint', variant: 'warning' },
+  MINTED: { label: 'Minted', variant: 'success' },
+  MINT_FAILED: { label: 'Mint Failed', variant: 'danger' },
+  REVOKED: { label: 'Revoked', variant: 'danger' },
+}
+
+function statusMeta(status) {
+  return STATUS_META[status] ?? { label: status, variant: 'neutral' }
+}
 
 export function IssuedCertificatesPage() {
-  const [certificates, setCertificates] = useState(mockCertificates)
+  const [certificates, setCertificates] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
+
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
   const [selectedCertificate, setSelectedCertificate] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [blockchainBusyId, setBlockchainBusyId] = useState(null)
   const navigate = useNavigate()
 
-  // Brief cosmetic loading state so the dashboard has a real skeleton to show
-  // on first paint. The data itself is still the same mock registry.
+  // loading already starts as true (see useState above), so calling this on mount
+  // doesn't need a synchronous setState — only the async settle callbacks below do.
+  const loadCertificates = () => {
+    listCertificates({ size: 100 })
+      .then((page) => {
+        setCertificates(page.content ?? [])
+        setLoadError('')
+      })
+      .catch((err) => setLoadError(err.message || 'Could not load certificates'))
+      .finally(() => setLoading(false))
+  }
+
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 600)
-    return () => clearTimeout(timer)
+    loadCertificates()
   }, [])
 
   const filteredCertificates = certificates.filter((cert) => {
+    const term = searchTerm.toLowerCase()
     const matchesSearch =
-      cert.name.toLowerCase().includes(searchTerm.toLowerCase()) || cert.usn.toLowerCase().includes(searchTerm.toLowerCase())
+      !term || cert.studentName?.toLowerCase().includes(term) || cert.studentUsn?.toLowerCase().includes(term)
     const matchesStatus = statusFilter === 'All' || cert.status === statusFilter
     return matchesSearch && matchesStatus
   })
 
   const recentActivity = [...certificates]
-    .sort((a, b) => new Date(b.issuedDate) - new Date(a.issuedDate))
+    .sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt))
     .slice(0, 4)
 
-  const handleRevoke = (certId) => {
-    setCertificates((prev) => prev.map((cert) => (cert.id === certId ? { ...cert, status: 'Revoked' } : cert)))
+  const applyUpdatedCertificate = (updated) => {
+    setCertificates((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+    setSelectedCertificate((prev) => (prev && prev.id === updated.id ? updated : prev))
+  }
+
+  const handleRevoke = async (cert) => {
+    const reason = window.prompt(`Reason for revoking ${cert.certificateNumber}?`)
+    if (!reason) return // required by the backend; cancel/blank aborts the action
+
+    setActionError('')
+    setBlockchainBusyId(cert.id)
+    try {
+      let updated
+      if (cert.status === 'MINTED') {
+        // Minted certificates must be revoked on-chain first, so the smart contract and the
+        // database stay in sync (see CertificateService.updateStatus's guard on the backend).
+        const { transactionHash } = await revokeCredentialOnChain({ tokenId: cert.tokenId, reason })
+        updated = await revokeCertificateBlockchain(cert.id, { tokenId: cert.tokenId, transactionHash, reason })
+      } else {
+        // Never minted (still PENDING_MINT / MINT_FAILED) — same plain Phase 2 revoke as before.
+        updated = await updateCertificateStatus(cert.id, 'REVOKED', reason)
+      }
+      applyUpdatedCertificate(updated)
+    } catch (err) {
+      setActionError(err.message || 'Failed to revoke certificate')
+    } finally {
+      setBlockchainBusyId(null)
+    }
+  }
+
+  const handleIssueOnBlockchain = async (cert) => {
+    setActionError('')
+
+    if (!cert.studentWalletAddress) {
+      setActionError('This student does not have a system-managed wallet on file yet.')
+      return
+    }
+    if (!cert.fileHash) {
+      setActionError('Upload the certificate PDF first — the blockchain credential needs its SHA-256 hash.')
+      return
+    }
+
+    setBlockchainBusyId(cert.id)
+    try {
+      // Step 1: admin's MetaMask signs and submits the mint transaction directly.
+      const { transactionHash, tokenId, contractAddress } = await issueCredentialOnChain({
+        certificateId: cert.id,
+        certificateHash: cert.fileHash,
+        studentWalletAddress: cert.studentWalletAddress,
+      })
+      // Step 2: backend independently re-verifies that transaction, then records it.
+      const updated = await issueCertificateBlockchain(cert.id, {
+        studentWalletAddress: cert.studentWalletAddress,
+        certificateHash: cert.fileHash,
+        tokenId,
+        contractAddress,
+        transactionHash,
+      })
+      applyUpdatedCertificate(updated)
+    } catch (err) {
+      setActionError(err.message || 'Blockchain issuance failed')
+    } finally {
+      setBlockchainBusyId(null)
+    }
+  }
+
+  const handleDownload = async (cert) => {
+    setActionError('')
+    try {
+      await downloadCertificateFile(cert.id, `${cert.certificateNumber}.pdf`)
+    } catch (err) {
+      setActionError(err.message || 'Failed to download certificate')
+    }
   }
 
   const handleViewCertificate = (cert) => {
     setSelectedCertificate(cert)
   }
 
+  const totalCount = certificates.length
+  const revokedCount = certificates.filter((c) => c.status === 'REVOKED').length
+  const pendingMintCount = certificates.filter((c) => c.status === 'PENDING_MINT').length
+  const mintedCount = certificates.filter((c) => c.status === 'MINTED').length
+
   return (
     <section className="min-h-screen bg-gradient-to-br from-gray-50 to-white py-14 sm:py-16">
       <div className="mx-auto max-w-[1200px] px-5 lg:px-10">
-        <PageHeader title="Issued Certificates" subtitle="Manage and monitor all blockchain-issued degree certificates" />
+        <PageHeader title="Issued Certificates" subtitle="Manage and monitor all issued degree certificates" />
+
+        {loadError && (
+          <Alert variant="error" title="Could not load certificates" className="mb-6">
+            {loadError}
+          </Alert>
+        )}
+        {actionError && (
+          <Alert variant="error" title="Action failed" className="mb-6">
+            {actionError}
+          </Alert>
+        )}
 
         {/* Stats Cards */}
         <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -115,7 +187,7 @@ export function IssuedCertificatesPage() {
             <>
               <StatCard
                 label="Total Certificates"
-                value={certificates.length}
+                value={totalCount}
                 iconBgClassName="bg-blue-100 text-blue-600"
                 icon={
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,8 +196,8 @@ export function IssuedCertificatesPage() {
                 }
               />
               <StatCard
-                label="Valid Certificates"
-                value={certificates.filter((c) => c.status === 'Valid').length}
+                label="Minted"
+                value={mintedCount}
                 valueClassName="text-green-600"
                 iconBgClassName="bg-green-100 text-green-600"
                 delay={0.05}
@@ -136,26 +208,26 @@ export function IssuedCertificatesPage() {
                 }
               />
               <StatCard
-                label="Revoked Certificates"
-                value={certificates.filter((c) => c.status === 'Revoked').length}
-                valueClassName="text-red-600"
-                iconBgClassName="bg-red-100 text-red-600"
+                label="Pending Mint"
+                value={pendingMintCount}
+                valueClassName="text-amber-600"
+                iconBgClassName="bg-amber-100 text-amber-600"
                 delay={0.1}
                 icon={
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 }
               />
               <StatCard
-                label="This Month"
-                value={3}
-                valueClassName="text-kredent-accent"
-                iconBgClassName="bg-orange-100 text-kredent-accent"
+                label="Revoked"
+                value={revokedCount}
+                valueClassName="text-red-600"
+                iconBgClassName="bg-red-100 text-red-600"
                 delay={0.15}
                 icon={
                   <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 }
               />
@@ -177,14 +249,14 @@ export function IssuedCertificatesPage() {
                 <li key={cert.id} className="flex items-start gap-3">
                   <div
                     className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${
-                      cert.status === 'Valid' ? 'bg-green-500' : 'bg-red-500'
+                      cert.status === 'REVOKED' ? 'bg-red-500' : 'bg-green-500'
                     }`}
                   />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-gray-800">
-                      {cert.status === 'Valid' ? 'Issued to' : 'Revoked for'} {cert.name}
+                      {cert.status === 'REVOKED' ? 'Revoked for' : 'Issued to'} {cert.studentName}
                     </p>
-                    <p className="text-xs text-gray-500">{cert.issuedDate}</p>
+                    <p className="text-xs text-gray-500">{cert.issuedAt?.slice(0, 10)}</p>
                   </div>
                 </li>
               ))}
@@ -197,7 +269,7 @@ export function IssuedCertificatesPage() {
           <Card>
             <CardHeader
               title="Certificate Registry"
-              subtitle="Blockchain-verified degree records"
+              subtitle="All issued degree records"
               icon={
                 <svg className="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v1a1 1 0 001 1h4a1 1 0 001-1v-1m3-2V8a2 2 0 00-2-2H8a2 2 0 00-2 2v8m5-4h4" />
@@ -236,8 +308,9 @@ export function IssuedCertificatesPage() {
                   className="py-2.5 lg:w-48"
                 >
                   <option value="All">All Status</option>
-                  <option value="Valid">Valid</option>
-                  <option value="Revoked">Revoked</option>
+                  <option value="PENDING_MINT">Pending Mint</option>
+                  <option value="MINTED">Minted</option>
+                  <option value="REVOKED">Revoked</option>
                 </Select>
               </div>
             </div>
@@ -283,17 +356,17 @@ export function IssuedCertificatesPage() {
                       >
                         <td className="px-6 py-4">
                           <div>
-                            <p className="font-semibold text-gray-900">{cert.name}</p>
-                            <p className="text-sm text-gray-500">{cert.degree}</p>
+                            <p className="font-semibold text-gray-900">{cert.studentName}</p>
+                            <p className="text-sm text-gray-500">{cert.degreeName}</p>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <code className="rounded bg-gray-100 px-2 py-1 font-mono text-sm text-gray-700">{cert.usn}</code>
+                          <code className="rounded bg-gray-100 px-2 py-1 font-mono text-sm text-gray-700">{cert.studentUsn}</code>
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-700">{cert.department}</td>
-                        <td className="px-6 py-4 text-sm text-gray-700">{cert.year}</td>
+                        <td className="px-6 py-4 text-sm text-gray-700">{cert.yearOfCompletion}</td>
                         <td className="px-6 py-4">
-                          <Badge status={cert.status} />
+                          <Badge variant={statusMeta(cert.status).variant}>{statusMeta(cert.status).label}</Badge>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center space-x-3">
@@ -303,12 +376,30 @@ export function IssuedCertificatesPage() {
                             >
                               View
                             </button>
-                            {cert.status === 'Valid' && (
+                            {cert.fileAvailable && (
                               <button
-                                onClick={() => handleRevoke(cert.id)}
-                                className="rounded text-sm font-medium text-red-600 transition-colors hover:text-red-800"
+                                onClick={() => handleDownload(cert)}
+                                className="rounded text-sm font-medium text-gray-700 transition-colors hover:text-gray-900"
                               >
-                                Revoke
+                                Download
+                              </button>
+                            )}
+                            {cert.status === 'PENDING_MINT' && cert.fileAvailable && (
+                              <button
+                                onClick={() => handleIssueOnBlockchain(cert)}
+                                disabled={blockchainBusyId === cert.id}
+                                className="rounded text-sm font-medium text-kredent-accent transition-colors hover:text-orange-700 disabled:opacity-50"
+                              >
+                                {blockchainBusyId === cert.id ? 'Issuing…' : 'Issue on Blockchain'}
+                              </button>
+                            )}
+                            {cert.status !== 'REVOKED' && (
+                              <button
+                                onClick={() => handleRevoke(cert)}
+                                disabled={blockchainBusyId === cert.id}
+                                className="rounded text-sm font-medium text-red-600 transition-colors hover:text-red-800 disabled:opacity-50"
+                              >
+                                {blockchainBusyId === cert.id ? 'Revoking…' : 'Revoke'}
                               </button>
                             )}
                           </div>
@@ -329,15 +420,19 @@ export function IssuedCertificatesPage() {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <p className="text-sm text-gray-600">Student Name</p>
-                  <p className="font-semibold text-gray-900">{selectedCertificate.name}</p>
+                  <p className="font-semibold text-gray-900">{selectedCertificate.studentName}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">USN</p>
-                  <p className="font-mono text-sm text-gray-900">{selectedCertificate.usn}</p>
+                  <p className="font-mono text-sm text-gray-900">{selectedCertificate.studentUsn}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Certificate Number</p>
+                  <p className="font-mono text-sm text-gray-900">{selectedCertificate.certificateNumber}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Degree</p>
-                  <p className="font-semibold text-gray-900">{selectedCertificate.degree}</p>
+                  <p className="font-semibold text-gray-900">{selectedCertificate.degreeName}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Department</p>
@@ -345,27 +440,111 @@ export function IssuedCertificatesPage() {
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Year of Completion</p>
-                  <p className="font-semibold text-gray-900">{selectedCertificate.year}</p>
+                  <p className="font-semibold text-gray-900">{selectedCertificate.yearOfCompletion}</p>
                 </div>
                 <div>
                   <p className="mb-1 text-sm text-gray-600">Status</p>
-                  <Badge status={selectedCertificate.status} />
-                </div>
-                <div className="md:col-span-2">
-                  <p className="mb-1 text-sm text-gray-600">Wallet Address</p>
-                  <p className="break-all rounded bg-gray-100 p-2 font-mono text-sm text-gray-900">
-                    {selectedCertificate.walletAddress}
-                  </p>
-                </div>
-                <div className="md:col-span-2">
-                  <p className="mb-1 text-sm text-gray-600">Transaction Hash</p>
-                  <p className="break-all rounded bg-gray-100 p-2 font-mono text-xs text-gray-900">
-                    {selectedCertificate.transactionHash}
-                  </p>
+                  <Badge variant={statusMeta(selectedCertificate.status).variant}>
+                    {statusMeta(selectedCertificate.status).label}
+                  </Badge>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Issued Date</p>
-                  <p className="font-semibold text-gray-900">{selectedCertificate.issuedDate}</p>
+                  <p className="font-semibold text-gray-900">{selectedCertificate.issuedAt?.slice(0, 10)}</p>
+                </div>
+                {selectedCertificate.revokedReason && (
+                  <div className="md:col-span-2">
+                    <p className="text-sm text-gray-600">Revoked Reason</p>
+                    <p className="font-semibold text-gray-900">{selectedCertificate.revokedReason}</p>
+                  </div>
+                )}
+                <div className="md:col-span-2">
+                  <p className="mb-1 text-sm text-gray-600">SHA-256 File Hash</p>
+                  {selectedCertificate.fileHash ? (
+                    <p className="break-all rounded bg-gray-100 p-2 font-mono text-xs text-gray-900">
+                      {selectedCertificate.fileHash}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-500 italic">No file uploaded yet</p>
+                  )}
+                </div>
+                {selectedCertificate.fileAvailable && (
+                  <div className="md:col-span-2">
+                    <Button variant="outline" size="sm" onClick={() => handleDownload(selectedCertificate)}>
+                      Download PDF
+                    </Button>
+                  </div>
+                )}
+
+                {/* Blockchain section (Phase 3) */}
+                <div className="border-t border-gray-200 pt-4 md:col-span-2">
+                  <p className="mb-2 text-sm font-semibold text-gray-700">Blockchain</p>
+
+                  {selectedCertificate.status === 'MINTED' || selectedCertificate.status === 'REVOKED' ? (
+                    <div className="space-y-3 rounded-lg bg-gray-50 p-4 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600">Blockchain Status:</span>
+                        <span
+                          className={`font-semibold ${
+                            selectedCertificate.status === 'REVOKED' ? 'text-red-600' : 'text-green-600'
+                          }`}
+                        >
+                          {selectedCertificate.status === 'REVOKED' ? 'REVOKED' : '✅ ISSUED'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-gray-600">Transaction Hash:</span>
+                        <a
+                          href={`${BLOCK_EXPLORER_URL}/tx/${selectedCertificate.txHash}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block break-all font-mono text-xs text-blue-600 hover:underline"
+                        >
+                          {selectedCertificate.txHash}
+                        </a>
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-gray-600">Token / Credential ID:</span>
+                        <span className="font-mono text-xs text-gray-900">{selectedCertificate.tokenId}</span>
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-gray-600">Student Wallet:</span>
+                        <span className="block break-all font-mono text-xs text-gray-900">{selectedCertificate.walletAddress}</span>
+                      </div>
+                      <div>
+                        <span className="mb-1 block text-gray-600">Contract:</span>
+                        <a
+                          href={`${BLOCK_EXPLORER_URL}/address/${selectedCertificate.contractAddress}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block break-all font-mono text-xs text-blue-600 hover:underline"
+                        >
+                          {selectedCertificate.contractAddress}
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg bg-gray-50 p-4 text-sm">
+                      <p className="mb-3 text-gray-600">
+                        Not yet issued on-chain. Student's system-managed wallet:{' '}
+                        <span className="font-mono text-xs text-gray-900">
+                          {selectedCertificate.studentWalletAddress || 'none on file'}
+                        </span>
+                      </p>
+                      {selectedCertificate.fileAvailable ? (
+                        <Button
+                          variant="accent"
+                          size="sm"
+                          loading={blockchainBusyId === selectedCertificate.id}
+                          onClick={() => handleIssueOnBlockchain(selectedCertificate)}
+                        >
+                          Issue on Blockchain
+                        </Button>
+                      ) : (
+                        <p className="text-xs italic text-gray-500">Upload the certificate PDF before issuing on the blockchain.</p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

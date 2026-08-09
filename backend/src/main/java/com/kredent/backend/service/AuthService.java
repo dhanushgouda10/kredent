@@ -18,11 +18,17 @@ public class AuthService {
     private final StudentRepository studentRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final WalletService walletService;
 
-    public AuthService(StudentRepository studentRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+    public AuthService(
+            StudentRepository studentRepository,
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService,
+            WalletService walletService) {
         this.studentRepository = studentRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.walletService = walletService;
     }
 
     public void register(RegisterRequest request) {
@@ -40,6 +46,12 @@ public class AuthService {
         student.setPhone(request.getPhone());
         student.setDepartment(request.getDepartment());
         student.setPassword(passwordEncoder.encode(request.getPassword()));
+
+        // Phase 3, "Option B": every student gets a system-managed blockchain wallet the
+        // moment their account is created. The student never sees or handles the private key.
+        WalletService.GeneratedWallet wallet = walletService.generateWallet();
+        student.setWalletAddress(wallet.getAddress());
+        student.setWalletPrivateKeyEncrypted(wallet.getEncryptedPrivateKey());
 
         studentRepository.save(student);
     }

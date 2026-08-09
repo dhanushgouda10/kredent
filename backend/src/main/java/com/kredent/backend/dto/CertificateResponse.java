@@ -7,11 +7,17 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Deliberately omits storagePath/fileUrl/fileHash/walletAddress/tokenId/contractAddress/txHash —
- * storagePath and fileUrl are internal storage details (the bucket is private; real access is
- * only ever through the backend's own authorized /download endpoint), and the blockchain/wallet
- * fields are still always null at this stage. fileAvailable is a derived boolean so the frontend
- * can show/hide a download button without needing to know anything about storage internals.
+ * Deliberately omits storagePath/fileUrl — those are internal storage details (the bucket is
+ * private; real access is only ever through the backend's own authorized /download endpoint).
+ * fileHash (Phase 2) and the blockchain fields (Phase 3) ARE included — they're meant to be
+ * shown/verified, not hidden. Two different wallet fields on purpose:
+ *   - studentWalletAddress: the student's CURRENT system-managed wallet (from Student), useful
+ *     before minting so the admin UI knows where a credential would be issued to.
+ *   - walletAddress: the wallet the credential was actually FROZEN to at mint time (from
+ *     Certificate itself) — null until minted, and doesn't change even if the student's wallet
+ *     were ever regenerated later.
+ * fileAvailable is a derived boolean so the frontend can show/hide a download button without
+ * needing to know anything about storage internals.
  */
 public class CertificateResponse {
 
@@ -34,6 +40,13 @@ public class CertificateResponse {
     private Long fileSizeBytes;
     private String mimeType;
     private LocalDateTime uploadedAt;
+    private String fileHash;
+    private String studentWalletAddress;
+    private String walletAddress;
+    private Long tokenId;
+    private String contractAddress;
+    private String txHash;
+    private LocalDateTime mintedAt;
 
     public static CertificateResponse from(Certificate cert) {
         CertificateResponse dto = new CertificateResponse();
@@ -56,6 +69,13 @@ public class CertificateResponse {
         dto.fileSizeBytes = cert.getFileSizeBytes();
         dto.mimeType = cert.getMimeType();
         dto.uploadedAt = cert.getUploadedAt();
+        dto.fileHash = cert.getFileHash();
+        dto.studentWalletAddress = cert.getStudent().getWalletAddress();
+        dto.walletAddress = cert.getWalletAddress();
+        dto.tokenId = cert.getTokenId();
+        dto.contractAddress = cert.getContractAddress();
+        dto.txHash = cert.getTxHash();
+        dto.mintedAt = cert.getMintedAt();
         return dto;
     }
 
@@ -209,5 +229,61 @@ public class CertificateResponse {
 
     public void setUploadedAt(LocalDateTime uploadedAt) {
         this.uploadedAt = uploadedAt;
+    }
+
+    public String getFileHash() {
+        return fileHash;
+    }
+
+    public void setFileHash(String fileHash) {
+        this.fileHash = fileHash;
+    }
+
+    public String getStudentWalletAddress() {
+        return studentWalletAddress;
+    }
+
+    public void setStudentWalletAddress(String studentWalletAddress) {
+        this.studentWalletAddress = studentWalletAddress;
+    }
+
+    public String getWalletAddress() {
+        return walletAddress;
+    }
+
+    public void setWalletAddress(String walletAddress) {
+        this.walletAddress = walletAddress;
+    }
+
+    public Long getTokenId() {
+        return tokenId;
+    }
+
+    public void setTokenId(Long tokenId) {
+        this.tokenId = tokenId;
+    }
+
+    public String getContractAddress() {
+        return contractAddress;
+    }
+
+    public void setContractAddress(String contractAddress) {
+        this.contractAddress = contractAddress;
+    }
+
+    public String getTxHash() {
+        return txHash;
+    }
+
+    public void setTxHash(String txHash) {
+        this.txHash = txHash;
+    }
+
+    public LocalDateTime getMintedAt() {
+        return mintedAt;
+    }
+
+    public void setMintedAt(LocalDateTime mintedAt) {
+        this.mintedAt = mintedAt;
     }
 }

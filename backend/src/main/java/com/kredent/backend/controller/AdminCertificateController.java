@@ -2,7 +2,9 @@ package com.kredent.backend.controller;
 
 import com.kredent.backend.dto.CertificateMetadataRequest;
 import com.kredent.backend.dto.CertificateResponse;
+import com.kredent.backend.dto.IssueBlockchainRequest;
 import com.kredent.backend.dto.PageResponse;
+import com.kredent.backend.dto.RevokeBlockchainRequest;
 import com.kredent.backend.dto.UpdateCertificateStatusRequest;
 import com.kredent.backend.service.CertificateService;
 import jakarta.validation.Valid;
@@ -41,6 +43,15 @@ public class AdminCertificateController {
         return ResponseEntity.status(HttpStatus.CREATED).body(certificateService.createMetadata(request));
     }
 
+    @GetMapping("/certificates")
+    public ResponseEntity<PageResponse<CertificateResponse>> listAll(
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        Pageable pageable = PageRequest.of(page, size, Sort.by("issuedAt").descending());
+        return ResponseEntity.ok(certificateService.listAll(search, pageable));
+    }
+
     @DeleteMapping("/certificates/{id}")
     public ResponseEntity<Void> deleteMetadata(@PathVariable UUID id) {
         certificateService.deleteMetadata(id);
@@ -59,6 +70,26 @@ public class AdminCertificateController {
             @PathVariable UUID id,
             @RequestParam("file") MultipartFile file) {
         return ResponseEntity.ok(certificateService.uploadFile(id, file));
+    }
+
+    /**
+     * Called AFTER the admin's MetaMask has already signed and mined the issueCredential()
+     * transaction directly from the browser (see frontend blockchainService.js). This endpoint
+     * never talks to MetaMask and never submits a transaction — it verifies and records one.
+     */
+    @PostMapping("/certificates/{id}/blockchain/issue")
+    public ResponseEntity<CertificateResponse> issueOnBlockchain(
+            @PathVariable UUID id,
+            @Valid @RequestBody IssueBlockchainRequest request) {
+        return ResponseEntity.ok(certificateService.issueOnBlockchain(id, request));
+    }
+
+    /** Same idea as issueOnBlockchain, but for a revokeCredential() transaction the admin already submitted. */
+    @PostMapping("/certificates/{id}/blockchain/revoke")
+    public ResponseEntity<CertificateResponse> revokeOnBlockchain(
+            @PathVariable UUID id,
+            @Valid @RequestBody RevokeBlockchainRequest request) {
+        return ResponseEntity.ok(certificateService.revokeOnBlockchain(id, request));
     }
 
     @GetMapping("/students/{studentId}/certificates")

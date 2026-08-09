@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
 import { loginAdminWithWallet } from '../services/authService'
 import { useAuth } from '../context/useAuth'
@@ -13,38 +13,46 @@ const perks = [
 ]
 
 export function AdminLoginPage() {
-  const [isConnecting, setIsConnecting] = useState(false)
-  const [isConnected, setIsConnected] = useState(false)
-  const [walletAddress, setWalletAddress] = useState('')
-  const [connectError, setConnectError] = useState(null)
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
+  const [loginError, setLoginError] = useState(null)
   const navigate = useNavigate()
   const { login } = useAuth()
 
-  const handleConnectMetaMask = async () => {
-    setConnectError(null)
+  /**
+   * TESTING / PRODUCTION-POLISH PHASE NOTE — read before touching this handler.
+   * Admin authentication still runs through the real, unchanged backend
+   * wallet-login flow: services/authService.js -> loginAdminWithWallet(),
+   * which calls POST /api/auth/admin/wallet-login. Nothing about that
+   * business logic or endpoint has changed.
+   *
+   * What changed is presentation only: the dedicated "Connect MetaMask" /
+   * "Wallet Connected!" two-step screen that used to render in the Card
+   * below has been parked, not deleted — see the "RESERVED FOR BLOCKCHAIN
+   * PHASE" block at the bottom of this file. For this phase, the visible
+   * flow is simply Home -> Admin Login -> Dashboard: a single "Login as
+   * Admin" button triggers the same MetaMask request + backend call
+   * silently and navigates straight to the dashboard on success, with no
+   * intermediate wallet-connection screen shown.
+   */
+  const handleAdminLogin = async () => {
+    setLoginError(null)
 
     if (!window.ethereum) {
-      setConnectError('MetaMask is not installed. Please install the MetaMask browser extension to continue.')
+      setLoginError('MetaMask is not installed. Please install the MetaMask browser extension to continue.')
       return
     }
 
-    setIsConnecting(true)
+    setIsLoggingIn(true)
     try {
       const [address] = await window.ethereum.request({ method: 'eth_requestAccounts' })
       const authResponse = await loginAdminWithWallet(address)
 
       login(authResponse)
-      setWalletAddress(address)
-      setIsConnected(true)
-
-      // Brief confirmation beat before redirecting to the dashboard.
-      setTimeout(() => {
-        navigate('/admin/issue-degree')
-      }, 1500)
+      navigate('/admin/issue-degree')
     } catch (err) {
-      setConnectError(err instanceof Error ? err.message : 'Could not connect wallet. Please try again.')
+      setLoginError(err instanceof Error ? err.message : 'Could not sign in. Please try again.')
     } finally {
-      setIsConnecting(false)
+      setIsLoggingIn(false)
     }
   }
 
@@ -98,8 +106,8 @@ export function AdminLoginPage() {
           <motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.7, delay: 0.3 }} className="lg:sticky lg:top-24">
             <Card>
               <CardHeader
-                title="MetaMask Authentication"
-                subtitle="Connect your wallet"
+                title="Admin Sign In"
+                subtitle="Secure institutional access"
                 icon={
                   <svg className="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -108,81 +116,32 @@ export function AdminLoginPage() {
               />
 
               <div className="p-6">
-                <AnimatePresence mode="wait">
-                  {!isConnected ? (
-                    <motion.div
-                      key="connect"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -20 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-6"
-                    >
-                      <div className="py-8 text-center">
-                        <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-orange-100">
-                          <svg className="h-12 w-12 text-kredent-accent" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                          </svg>
-                        </div>
+                <div className="space-y-6">
+                  <div className="py-8 text-center">
+                    <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-orange-100">
+                      <svg className="h-12 w-12 text-kredent-accent" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+                      </svg>
+                    </div>
 
-                        <h3 className="mb-2 text-xl font-semibold text-gray-900">Connect MetaMask Wallet</h3>
-                        <p className="mb-6 text-gray-600">Use your institutional MetaMask wallet to access the admin portal</p>
+                    <h3 className="mb-2 text-xl font-semibold text-gray-900">Sign in to continue</h3>
+                    <p className="mb-6 text-gray-600">Authenticate with your institutional admin access to manage certificates</p>
 
-                        <Button
-                          variant="accent"
-                          size="lg"
-                          fullWidth
-                          loading={isConnecting}
-                          onClick={handleConnectMetaMask}
-                          icon={
-                            <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
-                              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
-                            </svg>
-                          }
-                        >
-                          {isConnecting ? 'Connecting…' : 'Connect MetaMask'}
-                        </Button>
+                    <Button variant="accent" size="lg" fullWidth loading={isLoggingIn} onClick={handleAdminLogin}>
+                      {isLoggingIn ? 'Signing in…' : 'Login as Admin'}
+                    </Button>
 
-                        {connectError && (
-                          <div className="mt-4 text-left">
-                            <Alert variant="error">{connectError}</Alert>
-                          </div>
-                        )}
+                    {loginError && (
+                      <div className="mt-4 text-left">
+                        <Alert variant="error">{loginError}</Alert>
                       </div>
+                    )}
+                  </div>
 
-                      <div className="border-t border-gray-200 pt-6">
-                        <p className="text-center text-xs text-gray-500">
-                          By connecting, you agree to the MVJCE Blockchain Terms of Service
-                        </p>
-                      </div>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="connected"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -20 }}
-                      transition={{ duration: 0.2 }}
-                      className="space-y-6"
-                    >
-                      <div className="py-8 text-center">
-                        <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-                          <svg className="h-8 w-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                          </svg>
-                        </div>
-
-                        <h3 className="mb-2 text-xl font-semibold text-gray-900">Wallet Connected!</h3>
-                        <p className="mb-4 text-gray-600">Redirecting to admin dashboard…</p>
-
-                        <div className="rounded-lg bg-gray-50 p-4">
-                          <p className="mb-1 text-xs text-gray-500">Connected Wallet</p>
-                          <p className="break-all font-mono text-sm text-gray-800">{walletAddress}</p>
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                  <div className="border-t border-gray-200 pt-6">
+                    <p className="text-center text-xs text-gray-500">By signing in, you agree to the MVJCE terms of service</p>
+                  </div>
+                </div>
               </div>
             </Card>
           </motion.div>
@@ -191,3 +150,100 @@ export function AdminLoginPage() {
     </section>
   )
 }
+
+/* =============================================================================
+ * RESERVED FOR BLOCKCHAIN PHASE — DO NOT DELETE
+ * =============================================================================
+ * This is the original "Connect MetaMask" / "Wallet Connected!" two-step
+ * screen that used to render inside the Card above, between Admin Login and
+ * the dashboard. It was parked here (not deleted) during the testing /
+ * production-polish phase so the visible flow is Home -> Admin Login ->
+ * Dashboard with no separate wallet-connection screen. handleAdminLogin()
+ * above already reuses the exact same MetaMask + wallet-login logic that
+ * this block used, just without the "connected" confirmation pause.
+ *
+ * TO RESTORE (when the blockchain phase reintroduces explicit wallet UX):
+ * 1. Re-add `import { AnimatePresence } from 'framer-motion'` alongside the
+ *    existing `motion` import.
+ * 2. Re-add this state, next to `isLoggingIn`/`loginError`:
+ *      const [isConnected, setIsConnected] = useState(false)
+ *      const [walletAddress, setWalletAddress] = useState('')
+ * 3. In handleAdminLogin (or a restored handleConnectMetaMask), after a
+ *    successful login, set `setWalletAddress(address)` + `setIsConnected(true)`
+ *    and delay the `navigate('/admin/issue-degree')` call (e.g. setTimeout
+ *    1500ms) instead of navigating immediately, to give the "Connected!"
+ *    state below time to be seen.
+ * 4. Swap the single-state markup in the Card body above for the
+ *    AnimatePresence block below.
+ *
+ * <AnimatePresence mode="wait">
+ *   {!isConnected ? (
+ *     <motion.div
+ *       key="connect"
+ *       initial={{ opacity: 0, y: 20 }}
+ *       animate={{ opacity: 1, y: 0 }}
+ *       exit={{ opacity: 0, y: -20 }}
+ *       transition={{ duration: 0.2 }}
+ *       className="space-y-6"
+ *     >
+ *       <div className="py-8 text-center">
+ *         <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-orange-100">
+ *           <svg className="h-12 w-12 text-kredent-accent" fill="currentColor" viewBox="0 0 24 24">
+ *             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+ *           </svg>
+ *         </div>
+ *         <h3 className="mb-2 text-xl font-semibold text-gray-900">Connect MetaMask Wallet</h3>
+ *         <p className="mb-6 text-gray-600">Use your institutional MetaMask wallet to access the admin portal</p>
+ *         <Button
+ *           variant="accent"
+ *           size="lg"
+ *           fullWidth
+ *           loading={isConnecting}
+ *           onClick={handleConnectMetaMask}
+ *           icon={
+ *             <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+ *               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+ *             </svg>
+ *           }
+ *         >
+ *           {isConnecting ? 'Connecting…' : 'Connect MetaMask'}
+ *         </Button>
+ *         {connectError && (
+ *           <div className="mt-4 text-left">
+ *             <Alert variant="error">{connectError}</Alert>
+ *           </div>
+ *         )}
+ *       </div>
+ *       <div className="border-t border-gray-200 pt-6">
+ *         <p className="text-center text-xs text-gray-500">
+ *           By connecting, you agree to the MVJCE Blockchain Terms of Service
+ *         </p>
+ *       </div>
+ *     </motion.div>
+ *   ) : (
+ *     <motion.div
+ *       key="connected"
+ *       initial={{ opacity: 0, y: 20 }}
+ *       animate={{ opacity: 1, y: 0 }}
+ *       exit={{ opacity: 0, y: -20 }}
+ *       transition={{ duration: 0.2 }}
+ *       className="space-y-6"
+ *     >
+ *       <div className="py-8 text-center">
+ *         <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+ *           <svg className="h-8 w-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+ *             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+ *           </svg>
+ *         </div>
+ *         <h3 className="mb-2 text-xl font-semibold text-gray-900">Wallet Connected!</h3>
+ *         <p className="mb-4 text-gray-600">Redirecting to admin dashboard…</p>
+ *         <div className="rounded-lg bg-gray-50 p-4">
+ *           <p className="mb-1 text-xs text-gray-500">Connected Wallet</p>
+ *           <p className="break-all font-mono text-sm text-gray-800">{walletAddress}</p>
+ *         </div>
+ *       </div>
+ *     </motion.div>
+ *   )}
+ * </AnimatePresence>
+ * =============================================================================
+ */

@@ -17,12 +17,13 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * A single issued credential. Blockchain fields (tokenId, contractAddress,
- * txHash) and storage/hash fields are modeled now so the schema is stable,
- * but nothing in this module populates them yet — that's the Certificate
- * Issuance module (Supabase Storage upload + hashing) and the Blockchain
- * module (minting). This phase only needs the table to exist and relate
- * correctly to students/admins.
+ * A single issued credential. Storage (storagePath/fileUrl) and hashing
+ * (fileHash) are populated by the certificate upload flow (Phase 2).
+ * Blockchain fields (walletAddress, tokenId, contractAddress, txHash,
+ * mintedAt) are populated by CertificateService.issueOnBlockchain (Phase 3)
+ * once the admin's MetaMask has signed and mined the on-chain mint
+ * transaction — see also BlockchainVerificationService, which verifies that
+ * transaction before any of these fields are trusted/saved.
  */
 @Entity
 @Table(name = "certificates")
@@ -75,14 +76,15 @@ public class Certificate {
     @Column(name = "uploaded_at")
     private LocalDateTime uploadedAt;
 
-    // Nullable for now — computed from the PDF bytes once hashing is implemented (out of
-    // scope for this module: "Do NOT implement SHA-256 Hash").
+    // SHA-256 (hex) of the uploaded PDF's raw bytes, computed server-side in
+    // CertificateService.uploadFile. Null until a file is uploaded.
     @Column(name = "file_hash", unique = true)
     private String fileHash;
 
-    // Frozen at issuance time — intentionally independent of students.wallet_address,
-    // which may change later. See docs/architecture.md (wallet_mapping rationale).
-    // Nullable for now: wallet linking isn't implemented yet either.
+    // Frozen at issuance time — intentionally independent of students.wallet_address, which is
+    // read fresh each time (see CertificateResponse.studentWalletAddress) but could in theory
+    // change later. This column captures exactly which address the on-chain credential was
+    // actually minted to, permanently. Null until CertificateService.issueOnBlockchain runs.
     @Column(name = "wallet_address")
     private String walletAddress;
 
