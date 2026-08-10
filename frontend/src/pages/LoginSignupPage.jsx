@@ -93,7 +93,7 @@ export function LoginSignupPage() {
         password: formData.password,
       })
       login(authResponse)
-      navigate('/')
+      navigate('/student/dashboard')
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Login failed.')
     } finally {

@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
+
 /**
  * Seeds one admin record on startup so the wallet-login flow has something to
  * match against. Configure via env vars (see application.properties):
@@ -46,13 +48,31 @@ public class AdminSeeder implements CommandLineRunner {
         }
 
         String normalizedWallet = seedWallet.toLowerCase();
+        String effectiveEmail = seedEmail == null || seedEmail.isBlank() ? "admin@kredent.local" : seedEmail;
+
         if (adminRepository.findByWalletAddress(normalizedWallet).isPresent()) {
+            // Already seeded with the correct wallet on a previous startup — nothing to do.
+            return;
+        }
+
+        Optional<Admin> byEmail = adminRepository.findByEmail(effectiveEmail);
+        if (byEmail.isPresent()) {
+            // Same seed identity (email) already exists but with a different wallet on file —
+            // most likely a leftover row from an earlier/incorrect ADMIN_WALLET_ADDRESS value.
+            // Update just the wallet address in place instead of inserting a second row, which
+            // would violate the unique email constraint. fullName/email/passwordHash untouched.
+            Admin existing = byEmail.get();
+            String oldWallet = existing.getWalletAddress();
+            existing.setWalletAddress(normalizedWallet);
+            adminRepository.save(existing);
+            log.info("Updated existing seed admin's wallet address from {} to {} (email {})",
+                    oldWallet, normalizedWallet, effectiveEmail);
             return;
         }
 
         Admin admin = new Admin();
         admin.setFullName(seedFullName);
-        admin.setEmail(seedEmail == null || seedEmail.isBlank() ? "admin@kredent.local" : seedEmail);
+        admin.setEmail(effectiveEmail);
         admin.setWalletAddress(normalizedWallet);
         adminRepository.save(admin);
         log.info("Seeded default admin with wallet address {}", normalizedWallet);

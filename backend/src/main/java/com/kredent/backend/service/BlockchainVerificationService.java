@@ -1,5 +1,7 @@
 package com.kredent.backend.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,8 @@ import java.util.Optional;
 @Service
 public class BlockchainVerificationService {
 
+    private static final Logger log = LoggerFactory.getLogger(BlockchainVerificationService.class);
+
     private static final String SUCCESS_STATUS_HEX = "0x1";
     private static final String SUCCESS_STATUS_PLAIN = "1";
 
@@ -49,6 +53,20 @@ public class BlockchainVerificationService {
         this.adminWalletAddress = adminWalletAddress == null ? "" : adminWalletAddress.toLowerCase();
         this.configured = rpcUrl != null && !rpcUrl.isBlank() && !this.contractAddress.isBlank();
         this.web3j = this.configured ? Web3j.build(new HttpService(rpcUrl)) : null;
+
+        // Diagnostic-only, logged once at startup — never logs the RPC URL itself (it may embed
+        // a provider API key), just whether it's present. This turns a misconfiguration that
+        // would otherwise only surface later as an opaque 503 on the first mint attempt into
+        // something visible immediately in the console at boot.
+        if (configured) {
+            log.info("Blockchain verification configured: contract={}, adminWallet={}, rpcUrlSet=true",
+                    this.contractAddress, this.adminWalletAddress.isBlank() ? "(not set)" : this.adminWalletAddress);
+        } else {
+            log.warn("Blockchain verification NOT configured (rpcUrlSet={}, contractAddressSet={}). "
+                            + "Every /blockchain/issue and /blockchain/revoke request will fail with 503 until "
+                            + "BLOCKCHAIN_RPC_URL is set as a real environment variable and the backend is restarted.",
+                    rpcUrl != null && !rpcUrl.isBlank(), !this.contractAddress.isBlank());
+        }
     }
 
     /** Confirms a transaction hash really is a successful call into our contract, from the authorized admin wallet. */

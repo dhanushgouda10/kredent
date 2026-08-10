@@ -65,6 +65,34 @@ export async function listCertificates({ search = '', page = 0, size = 50 } = {}
   return res.json()
 }
 
+// GET /api/student/certificates?page=&size= — only the logged-in student's own certificates.
+// Ownership is enforced entirely server-side (the STUDENT-scoped JWT identifies the student —
+// nothing here sends a student ID for the backend to trust).
+export async function getMyCertificates({ page = 0, size = 100 } = {}) {
+  const params = new URLSearchParams({ page: String(page), size: String(size) })
+  const res = await fetch(`${API_BASE}/api/student/certificates?${params.toString()}`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res))
+  }
+  return res.json()
+}
+
+// GET /api/certificates/{id} — reachable by any authenticated user, but the backend only returns
+// the certificate if it belongs to the requesting student (or the caller is an admin) — see
+// CertificateService.assertCanView. A student can never fetch another student's certificate by
+// changing this ID.
+export async function getCertificateById(certificateId) {
+  const res = await fetch(`${API_BASE}/api/certificates/${certificateId}`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res))
+  }
+  return res.json()
+}
+
 // PATCH /api/admin/certificates/{id}/status — used for revoking (reason required by the backend).
 export async function updateCertificateStatus(certificateId, status, reason) {
   const res = await fetch(`${API_BASE}/api/admin/certificates/${certificateId}/status`, {

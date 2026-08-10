@@ -24,7 +24,7 @@ import {
   revokeCertificateBlockchain,
   updateCertificateStatus,
 } from '../services/certificateService'
-import { issueCredentialOnChain, revokeCredentialOnChain } from '../services/blockchainService'
+import { issueCredentialOnChain, revokeCredentialOnChain, onAccountsChanged } from '../services/blockchainService'
 import { BLOCK_EXPLORER_URL } from '../contracts/skillChainConfig'
 
 // Certificate.status (backend enum) -> how it should read/color in this admin UI.
@@ -49,6 +49,14 @@ export function IssuedCertificatesPage() {
   const [statusFilter, setStatusFilter] = useState('All')
   const [selectedCertificate, setSelectedCertificate] = useState(null)
   const [blockchainBusyId, setBlockchainBusyId] = useState(null)
+
+  // Manual reconciliation modal — shown when a certificate is confirmed already-minted on-chain
+  // (certificateIdToTokenId != 0) but the original transaction hash couldn't be auto-recovered.
+  const [reconcileTarget, setReconcileTarget] = useState(null) // { cert, tokenId, contractAddress, message }
+  const [reconcileHash, setReconcileHash] = useState('')
+  const [reconcileError, setReconcileError] = useState('')
+  const [reconcileSubmitting, setReconcileSubmitting] = useState(false)
+
   const navigate = useNavigate()
 
   // loading already starts as true (see useState above), so calling this on mount
@@ -65,6 +73,13 @@ export function IssuedCertificatesPage() {
 
   useEffect(() => {
     loadCertificates()
+  }, [])
+
+  // If the admin switches MetaMask accounts mid-session, clear any stale "wrong wallet" error
+  // so the next click re-checks fresh instead of showing an outdated message.
+  useEffect(() => {
+    const unsubscribe = onAccountsChanged(() => setActionError(''))
+    return unsubscribe
   }, [])
 
   const filteredCertificates = certificates.filter((cert) => {
@@ -123,13 +138,45 @@ export function IssuedCertificatesPage() {
 
     setBlockchainBusyId(cert.id)
     try {
-      // Step 1: admin's MetaMask signs and submits the mint transaction directly.
-      const { transactionHash, tokenId, contractAddress } = await issueCredentialOnChain({
-        certificateId: cert.id,
-        certificateHash: cert.fileHash,
-        studentWalletAddress: cert.studentWalletAddress,
-      })
-      // Step 2: backend independently re-verifies that transaction, then records it.
+      let transactionHash
+      let tokenId
+      let contractAddress
+      try {
+        // Step 1: admin's MetaMask signs and submits the mint transaction directly (or, if this
+        // certificate turns out to already be minted on-chain, this recovers the existing record
+        // instead of minting again).
+        const result = await issueCredentialOnChain({
+          certificateId: cert.id,
+          certificateHash: cert.fileHash,
+          studentWalletAddress: cert.studentWalletAddress,
+        })
+        transactionHash = result.transactionHash
+        tokenId = result.tokenId
+        contractAddress = result.contractAddress
+      } catch (chainError) {
+        console.info('[reconcile] caught error code from issueCredentialOnChain', {
+          certificateId: cert.id,
+          code: chainError.code,
+        })
+        // Confirmed already minted (tokenId is known), but the transaction hash couldn't be
+        // found automatically — open the reconciliation modal so the admin can supply a hash
+        // they already have (e.g. from the block explorer) instead of the certificate being stuck.
+        if (chainError.code !== 'ALREADY_MINTED_NEEDS_TX_HASH') {
+          throw chainError
+        }
+        setReconcileTarget({
+          cert,
+          tokenId: chainError.tokenId,
+          contractAddress: chainError.contractAddress,
+          message: chainError.message,
+        })
+        setReconcileHash('')
+        setReconcileError('')
+        return
+      }
+
+      // Step 2: backend independently re-verifies that transaction (status, contract, admin
+      // wallet) against its own RPC before recording it.
       const updated = await issueCertificateBlockchain(cert.id, {
         studentWalletAddress: cert.studentWalletAddress,
         certificateHash: cert.fileHash,
@@ -142,6 +189,57 @@ export function IssuedCertificatesPage() {
       setActionError(err.message || 'Blockchain issuance failed')
     } finally {
       setBlockchainBusyId(null)
+    }
+  }
+
+  const closeReconcileModal = () => {
+    setReconcileTarget(null)
+    setReconcileHash('')
+    setReconcileError('')
+  }
+
+  // Submits a manually-supplied transaction hash for a certificate already confirmed minted
+  // on-chain (via certificateIdToTokenId) whose hash couldn't be auto-recovered from event logs.
+  // Reuses the exact same backend endpoint as a fresh mint — the backend independently verifies
+  // the receipt (status/contract/admin wallet) before recording anything, whether the hash came
+  // from a live mint or this manual path.
+  const handleSubmitReconciliation = async () => {
+    if (!reconcileTarget) return
+    const trimmed = reconcileHash.trim()
+    if (!/^0x[0-9a-fA-F]{64}$/.test(trimmed)) {
+      setReconcileError('Enter a valid transaction hash (0x followed by 64 hex characters).')
+      return
+    }
+
+    const { cert, tokenId, contractAddress } = reconcileTarget
+    console.info('[reconcile] submitting manual reconciliation', {
+      certificateId: cert.id,
+      tokenId,
+      contractAddress,
+      transactionHash: trimmed,
+    })
+
+    setReconcileSubmitting(true)
+    setReconcileError('')
+    try {
+      const updated = await issueCertificateBlockchain(cert.id, {
+        studentWalletAddress: cert.studentWalletAddress,
+        certificateHash: cert.fileHash,
+        tokenId,
+        contractAddress,
+        transactionHash: trimmed,
+      })
+      console.info('[reconcile] backend response', updated)
+      applyUpdatedCertificate(updated)
+      closeReconcileModal()
+    } catch (err) {
+      console.error('[reconcile] backend rejected reconciliation', {
+        certificateId: cert.id,
+        error: err.message,
+      })
+      setReconcileError(err.message || 'Reconciliation failed')
+    } finally {
+      setReconcileSubmitting(false)
     }
   }
 
@@ -546,6 +644,43 @@ export function IssuedCertificatesPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+        </Modal>
+
+        {/* Blockchain Reconciliation Modal — shown when a certificate is confirmed already
+            minted on-chain but its transaction hash couldn't be recovered automatically. */}
+        <Modal open={Boolean(reconcileTarget)} onClose={closeReconcileModal} title="Complete blockchain reconciliation" size="md">
+          {reconcileTarget && (
+            <div className="space-y-4 p-6">
+              <p className="text-sm text-gray-700">{reconcileTarget.message}</p>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-600">Token ID</p>
+                  <p className="font-mono font-semibold text-gray-900">{reconcileTarget.tokenId}</p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Contract</p>
+                  <p className="break-all font-mono text-xs text-gray-900">{reconcileTarget.contractAddress}</p>
+                </div>
+              </div>
+              <Input
+                label="Transaction hash"
+                required
+                placeholder="0x..."
+                value={reconcileHash}
+                onChange={(e) => setReconcileHash(e.target.value)}
+                error={reconcileError}
+                hint="Find this on the block explorer for the mint transaction."
+              />
+              <div className="flex justify-end gap-3 pt-2">
+                <Button variant="outline" onClick={closeReconcileModal} disabled={reconcileSubmitting}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSubmitReconciliation} loading={reconcileSubmitting}>
+                  Submit
+                </Button>
               </div>
             </div>
           )}

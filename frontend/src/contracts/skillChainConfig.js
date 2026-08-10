@@ -7,6 +7,10 @@ export const NETWORK_NAME = import.meta.env.VITE_NETWORK_NAME ?? 'Sepolia'
 // eth_chainId RPC call returns).
 export const EXPECTED_CHAIN_ID_HEX = import.meta.env.VITE_CHAIN_ID_HEX ?? '0xaa36a7'
 export const BLOCK_EXPLORER_URL = import.meta.env.VITE_BLOCK_EXPLORER_URL ?? 'https://sepolia.etherscan.io'
+// Public Polygon Amoy RPC — only used as the required rpcUrls entry when asking MetaMask to add
+// the network via wallet_addEthereumChain. Distinct from (and safe to be public, unlike) the
+// backend's private Alchemy RPC URL, which is never exposed to the frontend.
+export const AMOY_PUBLIC_RPC_URL = 'https://rpc-amoy.polygon.technology'
 
 // Mirrors blockchain/contracts/SkillChainCredential.sol — only the functions/events the
 // frontend actually calls or listens for are included.
@@ -16,6 +20,7 @@ export const CONTRACT_ABI = [
   'function getCredential(uint256 tokenId) view returns (string certificateId, string certificateHash, address studentWallet, uint256 issuedAt, bool revoked, string revokeReason)',
   'function isValid(uint256 tokenId) view returns (bool)',
   'function issuer() view returns (address)',
+  'function certificateIdToTokenId(string certificateId) view returns (uint256)',
   'event CredentialIssued(uint256 indexed tokenId, string certificateId, address indexed studentWallet, string certificateHash)',
   'event CredentialRevoked(uint256 indexed tokenId, string reason)',
 ]
