@@ -6,10 +6,25 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import org.web3j.abi.FunctionEncoder;
+import org.web3j.abi.FunctionReturnDecoder;
+import org.web3j.abi.TypeReference;
+import org.web3j.abi.datatypes.Address;
+import org.web3j.abi.datatypes.Bool;
+import org.web3j.abi.datatypes.Function;
+import org.web3j.abi.datatypes.Type;
+import org.web3j.abi.datatypes.Utf8String;
+import org.web3j.abi.datatypes.generated.Uint256;
 import org.web3j.protocol.Web3j;
+import org.web3j.protocol.core.DefaultBlockParameterName;
+import org.web3j.protocol.core.methods.request.Transaction;
+import org.web3j.protocol.core.methods.response.EthCall;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.protocol.http.HttpService;
 
+import java.math.BigInteger;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -100,6 +115,66 @@ public class BlockchainVerificationService {
                 throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                         "That transaction was not sent from the authorized admin wallet");
             }
+        }
+    }
+
+    /** Independently-read credential state straight from the contract — see readCredential(). */
+    public record OnChainCredential(String certificateId, String certificateHash, String studentWallet, boolean revoked) {}
+
+    /**
+     * Reads a credential directly from the deployed contract's getCredential(tokenId) — used by
+     * public verification (PublicVerificationService) to confirm a certificate's on-chain state
+     * without trusting PostgreSQL alone. Pure read-only eth_call, never a transaction, never a
+     * private key. Returns empty if verification isn't configured, the RPC call fails, or the
+     * token doesn't exist on-chain — callers must treat an empty result as "could not verify",
+     * never as confirmation of authenticity.
+     */
+    public Optional<OnChainCredential> readCredential(long tokenId) {
+        if (!configured) {
+            return Optional.empty();
+        }
+        try {
+            Function function = new Function(
+                    "getCredential",
+                    List.of(new Uint256(BigInteger.valueOf(tokenId))),
+                    Arrays.asList(
+                            new TypeReference<Utf8String>() {},
+                            new TypeReference<Utf8String>() {},
+                            new TypeReference<Address>() {},
+                            new TypeReference<Uint256>() {},
+                            new TypeReference<Bool>() {},
+                            new TypeReference<Utf8String>() {}));
+
+            String encodedFunction = FunctionEncoder.encode(function);
+            EthCall response = web3j.ethCall(
+                            Transaction.createEthCallTransaction(null, contractAddress, encodedFunction),
+                            DefaultBlockParameterName.LATEST)
+                    .send();
+
+            if (response.hasError()) {
+                log.warn("getCredential({}) eth_call returned an RPC error: {}", tokenId, response.getError().getMessage());
+                return Optional.empty();
+            }
+
+            List<Type> decoded = FunctionReturnDecoder.decode(response.getValue(), function.getOutputParameters());
+            if (decoded.size() < 6) {
+                log.warn("getCredential({}) returned an unexpected number of values: {}", tokenId, decoded.size());
+                return Optional.empty();
+            }
+
+            String onChainCertificateId = (String) decoded.get(0).getValue();
+            String onChainCertificateHash = (String) decoded.get(1).getValue();
+            String onChainStudentWallet = (String) decoded.get(2).getValue();
+            Boolean onChainRevoked = (Boolean) decoded.get(4).getValue();
+
+            return Optional.of(new OnChainCredential(
+                    onChainCertificateId,
+                    onChainCertificateHash,
+                    onChainStudentWallet == null ? "" : onChainStudentWallet.toLowerCase(),
+                    Boolean.TRUE.equals(onChainRevoked)));
+        } catch (Exception e) {
+            log.warn("Failed to read credential {} from the blockchain: {}", tokenId, e.getMessage());
+            return Optional.empty();
         }
     }
 

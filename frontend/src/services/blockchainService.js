@@ -83,17 +83,43 @@ async function ensureCorrectNetwork() {
   }
 }
 
+/** Thrown whenever a required on-chain read can't be completed — RPC down, provider hiccup, etc.
+ *  Callers must treat this as "cannot verify," never as "safe to proceed." */
+function rpcUnavailableError(message) {
+  const err = new Error(message)
+  err.code = 'RPC_UNAVAILABLE'
+  return err
+}
+
 /**
  * Reads the deployed contract's on-chain issuer directly — this is the ground truth for who is
  * authorized to mint/revoke, and stays correct even if the issuer is ever rotated later via
  * setIssuer(), without needing a second hardcoded copy of the admin address in frontend config.
  * Read-only: uses a plain provider, no signer needed.
+ *
+ * If this read itself fails (RPC down, provider hiccup), that must not be silently treated as
+ * "any account is fine" — it throws a clear RPC_UNAVAILABLE error instead of letting the caller
+ * fall through to a transaction attempt against a contract we couldn't actually verify.
  */
 async function getAuthorizedIssuerAddress(ethereum) {
   const provider = new ethers.BrowserProvider(ethereum)
   const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider)
-  const issuer = await contract.issuer()
-  return issuer.toLowerCase()
+  try {
+    const issuer = await contract.issuer()
+    return issuer.toLowerCase()
+  } catch (error) {
+    console.error('[blockchain] could not read issuer() from the contract', {
+      reason: extractRevertReason(error),
+    })
+    throw rpcUnavailableError(
+      'Blockchain RPC unavailable — could not verify the authorized issuer wallet. Please try again in a moment.'
+    )
+  }
+}
+
+async function readActiveAccount(ethereum) {
+  const accounts = await ethereum.request({ method: 'eth_accounts' })
+  return accounts?.[0]?.toLowerCase() ?? null
 }
 
 /**
@@ -109,16 +135,14 @@ async function getAuthorizedIssuerAddress(ethereum) {
  * account — only the user can do that). It then re-reads eth_accounts and, if the active account
  * still doesn't match, throws a clear error and refuses to proceed — the transaction is never
  * signed by the wrong wallet.
+ *
+ * Takes the already-resolved authorizedIssuer (see getAuthorizedIssuerAddress) so callers that
+ * need that value for their own purposes — e.g. the issuance preflight's diagnostic log — don't
+ * have to read it from the contract twice. Returns the confirmed active account (guaranteed to
+ * equal authorizedIssuer if this resolves without throwing).
  */
-async function ensureCorrectAccount(ethereum) {
-  const authorizedIssuer = await getAuthorizedIssuerAddress(ethereum)
-
-  const readActive = async () => {
-    const accounts = await ethereum.request({ method: 'eth_accounts' })
-    return accounts?.[0]?.toLowerCase() ?? null
-  }
-
-  let active = await readActive()
+async function ensureCorrectAccount(ethereum, authorizedIssuer) {
+  let active = await readActiveAccount(ethereum)
 
   if (active !== authorizedIssuer) {
     try {
@@ -129,7 +153,7 @@ async function ensureCorrectAccount(ethereum) {
     } catch {
       // User dismissed the account picker — fall through, the check below produces the clear error.
     }
-    active = await readActive()
+    active = await readActiveAccount(ethereum)
   }
 
   if (active !== authorizedIssuer) {
@@ -137,13 +161,16 @@ async function ensureCorrectAccount(ethereum) {
       `Please connect the authorized admin wallet: ${authorizedIssuer}. MetaMask is currently using a different account.`
     )
   }
+
+  return active
 }
 
 async function getSigner() {
   const ethereum = getEthereumProvider()
   await connectAdminWallet()
   await ensureCorrectNetwork()
-  await ensureCorrectAccount(ethereum)
+  const authorizedIssuer = await getAuthorizedIssuerAddress(ethereum)
+  await ensureCorrectAccount(ethereum, authorizedIssuer)
   const provider = new ethers.BrowserProvider(ethereum)
   return provider.getSigner()
 }
@@ -193,20 +220,179 @@ function isAlreadyMintedError(error) {
   return extractRevertReason(error).toLowerCase().includes('already minted')
 }
 
-/** Turns ethers/MetaMask's various error shapes into one readable sentence for the UI. */
+/**
+ * Maps SkillChainCredential.sol's exact require() strings (see blockchain/contracts/
+ * SkillChainCredential.sol) to a specific, actionable message for the admin — instead of the
+ * previous behavior of showing either the raw Solidity string or a generic "Action failed" with
+ * no detail. Matched by substring, case-insensitively, against a decoded revert reason.
+ * `plain` is the short label used by the preflight simulation's "Blockchain validation failed:
+ * <reason>" message; `friendly` is the fuller sentence used by toFriendlyError for a real
+ * transaction failure or a revoke failure.
+ */
+const REVERT_REASON_MAP = [
+  { match: 'caller is not the authorized issuer', plain: 'Unauthorized issuer', friendly: 'Admin wallet is not the authorized issuer for this contract. Connect the correct MetaMask account.' },
+  { match: 'invalid student wallet', plain: 'Invalid student wallet', friendly: 'Student wallet address is invalid (empty or zero address) — cannot issue to it.' },
+  { match: 'certificateid required', plain: 'Certificate ID is required', friendly: 'Certificate ID is missing — cannot issue on-chain.' },
+  { match: 'certificatehash required', plain: 'Certificate hash is required', friendly: 'Certificate hash is missing — upload the certificate PDF first.' },
+  { match: 'certificate already minted', plain: 'Certificate already minted', friendly: 'This certificate has already been minted on the blockchain.' },
+]
+
+function mapKnownReason(reason) {
+  const lower = reason.toLowerCase()
+  const mapped = REVERT_REASON_MAP.find((entry) => lower.includes(entry.match))
+  return mapped ? mapped.plain : reason.replace('execution reverted: ', '')
+}
+
+// Standard Solidity `require(condition, "message")` / `revert("message")` ABI-encodes its string
+// argument behind the 4-byte selector for Error(string) — 0x08c379a0. Some error shapes (in
+// particular a raw eth_call revert surfaced through error.data or error.info.error.data without
+// ethers already having decoded it into .reason/.revert) only give us this raw hex, so this
+// decodes it by hand as a last resort before giving up.
+const ERROR_STRING_SELECTOR = '0x08c379a0'
+
+function decodeErrorStringFromHexData(data) {
+  if (typeof data !== 'string' || !data.startsWith(ERROR_STRING_SELECTOR)) {
+    return null
+  }
+  try {
+    const [decoded] = ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x' + data.slice(10))
+    return decoded
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Robustly extracts a human-readable revert reason from an ethers v6 CALL_EXCEPTION (or similar)
+ * error, checking every shape ethers/MetaMask/various RPC providers are known to populate —
+ * error.revert (ethers' own decoded Error(string) result), error.reason, error.shortMessage,
+ * error.data / error.info.error.data / error.error.data (raw hex, decoded by hand if needed),
+ * error.info.error.message, error.error.message, and finally error.message. Used specifically by
+ * the preflight staticCall simulation in issueCredentialOnChain, where the goal is the actual
+ * Solidity require() text, not just "something failed."
+ */
+function decodeRevertReason(error) {
+  const rawDataCandidates = [error?.data, error?.info?.error?.data, error?.error?.data]
+  for (const raw of rawDataCandidates) {
+    const decoded = decodeErrorStringFromHexData(raw)
+    if (decoded) {
+      return mapKnownReason(decoded)
+    }
+  }
+
+  const textCandidates = [
+    error?.revert?.args?.[0],
+    error?.reason,
+    error?.shortMessage,
+    error?.info?.error?.message,
+    error?.error?.message,
+    error?.error?.data?.message,
+    error?.data?.message,
+    typeof error?.data === 'string' ? error.data : null,
+    error?.message,
+  ]
+  for (const candidate of textCandidates) {
+    if (typeof candidate === 'string' && candidate.trim() && !candidate.toLowerCase().includes('could not coalesce')) {
+      return mapKnownReason(candidate)
+    }
+  }
+
+  return 'unknown error (no revert reason could be decoded from MetaMask or the RPC provider)'
+}
+
+/** Turns ethers/MetaMask's various error shapes into one readable, specific sentence for the UI. */
 function toFriendlyError(error) {
   const code = error?.code
   if (code === 'ACTION_REJECTED' || code === 4001) {
     return new Error('Transaction was rejected in MetaMask.')
   }
+  if (code === 'RPC_UNAVAILABLE') {
+    return new Error(error.message)
+  }
+
   const reason = extractRevertReason(error)
+  const lowerReason = reason.toLowerCase()
+
   // Ethers' own internal "could not coalesce error" (thrown when it can't parse an RPC
   // provider's error response) is not useful to show — it's not a revert reason, just ethers
   // giving up on normalizing the underlying error. Never surface it as if it were one.
-  if (reason && !reason.toLowerCase().includes('could not coalesce')) {
-    return new Error(reason.replace('execution reverted: ', ''))
+  if (reason && !lowerReason.includes('could not coalesce')) {
+    const mapped = REVERT_REASON_MAP.find((entry) => lowerReason.includes(entry.match))
+    if (mapped) {
+      return new Error(mapped.friendly)
+    }
+    return new Error(`Transaction reverted: ${reason.replace('execution reverted: ', '')}`)
+  }
+
+  // No usable reason at all — this is what MetaMask's own "Interaction failed" screen (a
+  // simulated revert caught during gas estimation, before a normal confirm screen ever appears)
+  // often looks like: the error object handed back to ethers doesn't always carry a cleanly
+  // decoded revert string. A dropped/unreachable RPC produces the same shape.
+  if (code === 'NETWORK_ERROR' || code === 'SERVER_ERROR' || code === 'TIMEOUT') {
+    return new Error('Blockchain RPC unavailable. Please try again in a moment.')
   }
   return new Error('The blockchain transaction failed and no further detail was available from MetaMask or the RPC provider. Please try again.')
+}
+
+/**
+ * Fast, clear, client-side rejection of obviously-bad parameters before ever touching MetaMask —
+ * so a missing/invalid value produces one of these specific messages instead of an opaque
+ * contract revert (or, worse, an opaque MetaMask "Interaction failed" with no message at all).
+ * Mirrors the contract's own require() checks (see SkillChainCredential.sol issueCredential),
+ * just enforced a step earlier.
+ */
+function validateIssueParams({ certificateId, certificateHash, studentWalletAddress }) {
+  if (!certificateId || !String(certificateId).trim()) {
+    throw new Error('Certificate ID is missing — cannot issue on-chain.')
+  }
+  if (!certificateHash || !String(certificateHash).trim()) {
+    throw new Error('Certificate hash is missing — upload the certificate PDF first.')
+  }
+  if (!studentWalletAddress || !ethers.isAddress(studentWalletAddress)) {
+    throw new Error('Student wallet address is invalid or missing.')
+  }
+  if (studentWalletAddress.toLowerCase() === ethers.ZeroAddress.toLowerCase()) {
+    throw new Error('Student wallet address is invalid (zero address) — cannot issue to it.')
+  }
+}
+
+// Polygon Amoy's current RPC enforces a minimum priority fee (gas tip cap) of 25 gwei —
+// confirmed directly from the live MetaMask RPC error: "gas tip cap 1500000000, minimum needed
+// 25000000000" (1.5 gwei vs. the required 25 gwei). 1.5 gwei is ethers v6's own hardcoded
+// fallback maxPriorityFeePerGas, used whenever a provider's fee suggestion isn't high enough to
+// begin with — it's too low for Amoy's current minimum, which is why the staticCall simulation
+// (a plain eth_call, no gas pricing involved) succeeded while the real transaction was rejected
+// at the RPC layer before ever reaching the contract. This is a network fee-policy issue, not a
+// contract or business-logic one, so it's handled here as a small, explicit fee override applied
+// to the two transactions this file actually sends (issueCredential, revokeCredential).
+const AMOY_MIN_PRIORITY_FEE = ethers.parseUnits('25', 'gwei')
+
+/**
+ * Builds EIP-1559 fee overrides that satisfy Polygon Amoy's current minimum priority fee.
+ *
+ * Deliberately does NOT call provider.getFeeData() — ethers v6's getFeeData() tries to source a
+ * network-suggested priority fee via the eth_maxPriorityFeePerGas RPC method, and Polygon Amoy's
+ * current RPC does not implement it ("The method eth_maxPriorityFeePerGas does not exist / is
+ * not available"), which surfaced as a MetaMask RPC error even though the staticCall preflight
+ * and the earlier flat 1.5 gwei default both looked fine on the surface.
+ *
+ * The only RPC call this makes is eth_getBlockByNumber (via provider.getBlock('latest')), which
+ * every RPC provider supports and which is all that's actually needed here: the current
+ * baseFeePerGas. There is no supported way to read the network's own suggested priority fee from
+ * this RPC, so the priority fee is fixed at Amoy's confirmed required minimum of 25 gwei (from
+ * the earlier "gas tip cap 1500000000, minimum needed 25000000000" rejection) rather than left
+ * unset or guessed. maxFeePerGas covers baseFeePerGas + maxPriorityFeePerGas with a 2x base-fee
+ * safety buffer for base fee movement across the next few blocks — not an unnecessarily huge
+ * flat number.
+ */
+async function getAmoyFeeOverrides(provider) {
+  const latestBlock = await provider.getBlock('latest')
+  const baseFeePerGas = latestBlock?.baseFeePerGas ?? AMOY_MIN_PRIORITY_FEE
+
+  const maxPriorityFeePerGas = AMOY_MIN_PRIORITY_FEE
+  const maxFeePerGas = baseFeePerGas * 2n + maxPriorityFeePerGas
+
+  return { maxPriorityFeePerGas, maxFeePerGas, baseFeePerGas }
 }
 
 /** Pulls the token ID out of a mint receipt's CredentialIssued event log. */
@@ -227,20 +413,28 @@ function extractTokenIdFromReceipt(contract, receipt) {
 /**
  * Read-only pre-check: is this certificateId already minted? Called BEFORE ever attempting a
  * transaction, so an already-minted certificate never gets a doomed-to-revert issueCredential()
- * sent at all. Returns the existing tokenId (string) if minted, otherwise null. If the read
- * itself fails (RPC hiccup), this does not throw — it returns null so the caller falls through
- * to a normal mint attempt, which still has its own already-minted recovery as a safety net.
+ * sent at all. Returns the existing tokenId (string) if minted, or null if the contract confirms
+ * it is NOT minted.
+ *
+ * FAILS CLOSED: this used to swallow a failed read and return null, treating "couldn't check" the
+ * same as "confirmed not minted" — which let a doomed (or even a genuinely duplicate) transaction
+ * reach MetaMask on a plain RPC hiccup, with no clear explanation of why it then reverted. It now
+ * throws RPC_UNAVAILABLE instead, and the caller must not proceed to a mint attempt when it can't
+ * actually verify the certificate's on-chain state first.
  */
 async function checkExistingTokenId(contract, certificateId) {
   try {
     const tokenId = await contract.certificateIdToTokenId(certificateId)
     return tokenId && tokenId !== 0n ? tokenId.toString() : null
   } catch (error) {
-    console.warn('[blockchain] certificateIdToTokenId pre-check failed, proceeding with mint attempt', {
+    console.error('[blockchain] certificateIdToTokenId pre-check failed — refusing to risk a mint attempt', {
       certificateId,
       reason: extractRevertReason(error),
     })
-    return null
+    throw rpcUnavailableError(
+      "Could not verify this certificate's blockchain state before minting (the RPC read failed). " +
+        'Please try again in a moment.'
+    )
   }
 }
 
@@ -329,71 +523,149 @@ async function recoverExistingMint(contract, certificateId, knownTokenId) {
  * transaction hash and the newly minted token ID (read from the CredentialIssued event in the
  * mined receipt) so the caller can report them to the backend for verification + storage.
  *
- * Checks certificateIdToTokenId() BEFORE sending any transaction. If the certificate is already
- * minted (a prior attempt succeeded on-chain but this certificate was never marked MINTED in the
- * database — most likely its backend verification step failed separately), this recovers the
- * existing mint's tokenId/txHash instead of sending another transaction, which the contract would
- * correctly reject anyway. A catch around the mint call is kept as a fallback in case the
- * pre-check itself couldn't run.
+ * Flow (each step must pass before the next runs):
+ *   1-2. Connect MetaMask, confirm it's on Polygon Amoy.
+ *   3-5. Read the contract's issuer() and make sure the active MetaMask account matches it.
+ *   6.   Validate certificateId / certificateHash / studentWalletAddress client-side.
+ *   7-9. Read certificateIdToTokenId(certificateId). Fails CLOSED: an RPC read failure stops
+ *        here rather than guessing; a nonzero tokenId means it's already minted, so this
+ *        recovers the existing record rather than ever minting it again.
+ *   10-11. STATIC CALL simulation of issueCredential(...) with the exact same three parameters,
+ *        via the exact same signer/contract — a plain eth_call ethers issues and decodes itself,
+ *        entirely independent of MetaMask's own internal gas-estimation UI (the source of the
+ *        opaque "Interaction failed" screen with no usable detail). If this reverts, the reason
+ *        is decoded and thrown immediately — the real transaction is NEVER sent and MetaMask's
+ *        confirm popup NEVER opens.
+ *   12-14. Only once the simulation succeeds: send the real transaction and wait for the receipt.
  */
 export async function issueCredentialOnChain({ certificateId, certificateHash, studentWalletAddress }) {
   assertContractConfigured()
+  validateIssueParams({ certificateId, certificateHash, studentWalletAddress })
+
+  const ethereum = getEthereumProvider()
+
+  // Steps 1-2.
+  await connectAdminWallet()
+  await ensureCorrectNetwork()
+
+  // Steps 3-5.
+  const authorizedIssuer = await getAuthorizedIssuerAddress(ethereum)
+  const connectedAccount = await ensureCorrectAccount(ethereum, authorizedIssuer)
+
+  const provider = new ethers.BrowserProvider(ethereum)
+  const signer = await provider.getSigner()
+  const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer)
+
+  // Steps 7-9. FAILS CLOSED — an RPC failure here stops the whole flow, it does not fall through
+  // to a transaction attempt we can't actually verify is safe.
+  let existingTokenId
   try {
-    const signer = await getSigner()
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer)
-
-    const existingTokenId = await checkExistingTokenId(contract, certificateId)
-    if (existingTokenId !== null) {
-      console.info('[blockchain] certificate already minted, recovering existing record instead of minting again', {
-        certificateId,
-        tokenId: existingTokenId,
-        contractAddress: CONTRACT_ADDRESS,
-      })
-      return await recoverExistingMint(contract, certificateId, existingTokenId)
+    existingTokenId = await checkExistingTokenId(contract, certificateId)
+  } catch (error) {
+    if (error?.code === 'RPC_UNAVAILABLE') {
+      throw new Error('Unable to read certificate state from Polygon Amoy. Transaction was not sent.', { cause: error })
     }
+    throw error
+  }
 
-    let receipt
-    try {
-      const tx = await contract.issueCredential(certificateId, certificateHash, studentWalletAddress)
-      receipt = await tx.wait()
-    } catch (mintError) {
-      if (!isAlreadyMintedError(mintError)) {
-        throw mintError
-      }
+  // Safe diagnostic snapshot, logged before any simulation/transaction is attempted. Deliberately
+  // logs certificateHash's LENGTH only, never the hash value itself.
+  console.info('[blockchain] issuance preflight', {
+    contractAddress: CONTRACT_ADDRESS,
+    connectedAccount,
+    authorizedIssuer,
+    certificateId,
+    studentWalletAddress,
+    certificateHashLength: certificateHash?.length ?? 0,
+    existingTokenId,
+  })
+
+  if (existingTokenId !== null) {
+    // Already minted on-chain — never mint again. Recover the existing record instead (either
+    // automatically from event logs, or via the manual-reconciliation path if that lookup itself
+    // can't complete), so a database that's merely out of sync with the chain gets fixed instead
+    // of a duplicate transaction being attempted.
+    console.info('[blockchain] certificate already minted, recovering existing record instead of minting again', {
+      certificateId,
+      tokenId: existingTokenId,
+      contractAddress: CONTRACT_ADDRESS,
+    })
+    return await recoverExistingMint(contract, certificateId, existingTokenId)
+  }
+
+  // Steps 10-11: preflight simulation. A plain read-only eth_call — no MetaMask popup, no gas
+  // spent, no state change. If it reverts, we stop right here with a decoded reason.
+  try {
+    await contract.issueCredential.staticCall(certificateId, certificateHash, studentWalletAddress)
+  } catch (simulationError) {
+    const code = simulationError?.code
+    let message
+    if (code === 'ACTION_REJECTED' || code === 4001) {
+      message = 'Transaction was rejected in MetaMask.'
+    } else if (code === 'INSUFFICIENT_FUNDS') {
+      message = 'Insufficient POL balance to pay for gas on Polygon Amoy.'
+    } else if (code === 'NETWORK_ERROR' || code === 'SERVER_ERROR' || code === 'TIMEOUT') {
+      message = 'Blockchain RPC unavailable. Please try again in a moment.'
+    } else {
+      // Covers CALL_EXCEPTION and UNKNOWN_ERROR alike — decodeRevertReason checks every shape
+      // (error.revert, .reason, .shortMessage, .data, .info.error.data/.message, .error.data/
+      // .message, nested objects) rather than assuming any single one is populated.
+      message = `Blockchain validation failed: ${decodeRevertReason(simulationError)}`
+    }
+    console.error('[blockchain] issueCredential preflight simulation reverted — real transaction was NOT sent', {
+      certificateId,
+      code,
+      message,
+    })
+    throw new Error(message, { cause: simulationError })
+  }
+
+  // Steps 12-14: simulation succeeded — safe to send the real transaction. Amoy's RPC requires
+  // a minimum 25 gwei priority fee (see getAmoyFeeOverrides) — without this, ethers' own default
+  // fee suggestion (~1.5 gwei) gets the transaction rejected at the RPC layer, after the
+  // staticCall simulation above has already succeeded (the simulation is a plain eth_call and
+  // never involves gas pricing, so it can't catch this).
+  let receipt
+  try {
+    const feeOverrides = await getAmoyFeeOverrides(provider)
+    console.info('[blockchain] transaction fee overrides', {
+      maxPriorityFeePerGas: `${ethers.formatUnits(feeOverrides.maxPriorityFeePerGas, 'gwei')} gwei`,
+      maxFeePerGas: `${ethers.formatUnits(feeOverrides.maxFeePerGas, 'gwei')} gwei`,
+      baseFeePerGas: `${ethers.formatUnits(feeOverrides.baseFeePerGas, 'gwei')} gwei`,
+    })
+    const tx = await contract.issueCredential(certificateId, certificateHash, studentWalletAddress, {
+      maxPriorityFeePerGas: feeOverrides.maxPriorityFeePerGas,
+      maxFeePerGas: feeOverrides.maxFeePerGas,
+    })
+    receipt = await tx.wait()
+  } catch (mintError) {
+    if (isAlreadyMintedError(mintError)) {
       return await recoverExistingMint(contract, certificateId)
     }
-
-    const tokenId = extractTokenIdFromReceipt(contract, receipt)
-    if (!tokenId) {
-      throw new Error('Transaction succeeded but the CredentialIssued event was not found — cannot determine the token ID.')
-    }
-
-    console.info('[blockchain] mint succeeded', {
+    console.error('[blockchain] issueCredential transaction failed after a successful simulation', {
       certificateId,
-      tokenId,
-      contractAddress: CONTRACT_ADDRESS,
-      transactionHash: receipt.hash,
+      code: mintError?.code,
+      reason: extractRevertReason(mintError),
     })
+    throw toFriendlyError(mintError)
+  }
 
-    return {
-      transactionHash: receipt.hash,
-      tokenId,
-      contractAddress: CONTRACT_ADDRESS,
-    }
-  } catch (error) {
-    console.error('[blockchain] issueCredentialOnChain failed', {
-      certificateId,
-      code: error?.code,
-      reason: extractRevertReason(error),
-    })
-    // ALREADY_MINTED_NEEDS_TX_HASH (thrown by recoverExistingMint above) must reach the caller
-    // intact — it carries tokenId/contractAddress the UI needs to offer manual reconciliation.
-    // toFriendlyError() below builds a plain new Error for display purposes and would otherwise
-    // silently strip that typed code and those fields.
-    if (error?.code === 'ALREADY_MINTED_NEEDS_TX_HASH') {
-      throw error
-    }
-    throw toFriendlyError(error)
+  const tokenId = extractTokenIdFromReceipt(contract, receipt)
+  if (!tokenId) {
+    throw new Error('Transaction succeeded but the CredentialIssued event was not found — cannot determine the token ID.')
+  }
+
+  console.info('[blockchain] mint succeeded', {
+    certificateId,
+    tokenId,
+    contractAddress: CONTRACT_ADDRESS,
+    transactionHash: receipt.hash,
+  })
+
+  return {
+    transactionHash: receipt.hash,
+    tokenId,
+    contractAddress: CONTRACT_ADDRESS,
   }
 }
 
@@ -404,7 +676,18 @@ export async function revokeCredentialOnChain({ tokenId, reason }) {
     const signer = await getSigner()
     const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer)
 
-    const tx = await contract.revokeCredential(tokenId, reason)
+    // Same Amoy minimum-priority-fee requirement as issueCredentialOnChain — see
+    // getAmoyFeeOverrides for why this is needed.
+    const feeOverrides = await getAmoyFeeOverrides(signer.provider)
+    console.info('[blockchain] transaction fee overrides', {
+      maxPriorityFeePerGas: `${ethers.formatUnits(feeOverrides.maxPriorityFeePerGas, 'gwei')} gwei`,
+      maxFeePerGas: `${ethers.formatUnits(feeOverrides.maxFeePerGas, 'gwei')} gwei`,
+      baseFeePerGas: `${ethers.formatUnits(feeOverrides.baseFeePerGas, 'gwei')} gwei`,
+    })
+    const tx = await contract.revokeCredential(tokenId, reason, {
+      maxPriorityFeePerGas: feeOverrides.maxPriorityFeePerGas,
+      maxFeePerGas: feeOverrides.maxFeePerGas,
+    })
     const receipt = await tx.wait()
 
     return { transactionHash: receipt.hash }

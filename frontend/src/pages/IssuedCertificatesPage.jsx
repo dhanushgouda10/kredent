@@ -7,11 +7,11 @@ import {
   Button,
   Card,
   CardHeader,
-  ChartPlaceholder,
   EmptyState,
   Input,
   Modal,
   PageHeader,
+  Pagination,
   Select,
   SkeletonRow,
   SkeletonStatCard,
@@ -25,7 +25,10 @@ import {
   updateCertificateStatus,
 } from '../services/certificateService'
 import { issueCredentialOnChain, revokeCredentialOnChain, onAccountsChanged } from '../services/blockchainService'
+import { listDepartments, getDepartmentSummary } from '../services/departmentService'
 import { BLOCK_EXPLORER_URL } from '../contracts/skillChainConfig'
+
+const PAGE_SIZE = 20
 
 // Certificate.status (backend enum) -> how it should read/color in this admin UI.
 const STATUS_META = {
@@ -39,14 +42,28 @@ function statusMeta(status) {
   return STATUS_META[status] ?? { label: status, variant: 'neutral' }
 }
 
+// Reasonable graduation-year filter options — not stored data, just the range of years the year
+// picker offers; actual filtering only ever matches real certificate.yearOfCompletion values.
+const CURRENT_YEAR = new Date().getFullYear()
+const YEAR_OPTIONS = Array.from({ length: 8 }, (_, i) => CURRENT_YEAR + 1 - i)
+
 export function IssuedCertificatesPage() {
+  const [departments, setDepartments] = useState([])
+  const [selectedDepartment, setSelectedDepartment] = useState('')
+  const [deptSummary, setDeptSummary] = useState(null)
+  const [deptSummaryError, setDeptSummaryError] = useState('')
+
   const [certificates, setCertificates] = useState([])
+  const [pageInfo, setPageInfo] = useState({ page: 0, totalPages: 0, totalElements: 0 })
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [actionError, setActionError] = useState('')
 
-  const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('All')
+  const [searchInput, setSearchInput] = useState('')
+  const [appliedSearch, setAppliedSearch] = useState('')
+  const [yearFilter, setYearFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+
   const [selectedCertificate, setSelectedCertificate] = useState(null)
   const [blockchainBusyId, setBlockchainBusyId] = useState(null)
 
@@ -59,21 +76,94 @@ export function IssuedCertificatesPage() {
 
   const navigate = useNavigate()
 
-  // loading already starts as true (see useState above), so calling this on mount
-  // doesn't need a synchronous setState — only the async settle callbacks below do.
-  const loadCertificates = () => {
-    listCertificates({ size: 100 })
-      .then((page) => {
-        setCertificates(page.content ?? [])
+  // departments starts as [] so no synchronous setState is needed for the happy path — only the
+  // async settle callbacks below.
+  useEffect(() => {
+    let cancelled = false
+    listDepartments()
+      .then((list) => {
+        if (!cancelled) setDepartments(list)
+      })
+      .catch(() => {
+        // Non-fatal — the department switcher just won't render; filtering by department still
+        // works if a code is set some other way, and the rest of the registry is unaffected.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Real, DB-computed counts for the selected department (Total Students, Certificates, Pending,
+  // Minted, Revoked) — the "department dashboard" strip. Only fetched when a department is
+  // actually selected; cleared otherwise.
+  useEffect(() => {
+    let cancelled = false
+    // Always resolve asynchronously (even the "no department selected" case) so every setState
+    // call happens inside a .then callback rather than synchronously in the effect body.
+    Promise.resolve()
+      .then(() => (selectedDepartment ? getDepartmentSummary(selectedDepartment) : null))
+      .then((summary) => {
+        if (cancelled) return
+        setDeptSummary(summary)
+        setDeptSummaryError('')
+      })
+      .catch((err) => {
+        if (!cancelled) setDeptSummaryError(err.message || 'Could not load department summary')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDepartment])
+
+  const loadCertificates = (page = 0) => {
+    setLoading(true)
+    listCertificates({
+      department: selectedDepartment,
+      year: yearFilter,
+      status: statusFilter,
+      search: appliedSearch,
+      page,
+      size: PAGE_SIZE,
+    })
+      .then((res) => {
+        setCertificates(res.content ?? [])
+        setPageInfo({ page: res.page, totalPages: res.totalPages, totalElements: res.totalElements })
         setLoadError('')
       })
       .catch((err) => setLoadError(err.message || 'Could not load certificates'))
       .finally(() => setLoading(false))
   }
 
+  // Re-fetches page 0 whenever a filter changes. Deliberately avoids any synchronous setState
+  // call in the effect body (see AdminStudentsPage for the same pattern) — every update happens
+  // inside a .then/.catch/.finally callback, so the table swaps in the new filtered data once it
+  // arrives rather than flashing a skeleton state on every filter change.
   useEffect(() => {
-    loadCertificates()
-  }, [])
+    let cancelled = false
+    listCertificates({
+      department: selectedDepartment,
+      year: yearFilter,
+      status: statusFilter,
+      search: appliedSearch,
+      page: 0,
+      size: PAGE_SIZE,
+    })
+      .then((res) => {
+        if (cancelled) return
+        setCertificates(res.content ?? [])
+        setPageInfo({ page: res.page, totalPages: res.totalPages, totalElements: res.totalElements })
+        setLoadError('')
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err.message || 'Could not load certificates')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDepartment, yearFilter, statusFilter, appliedSearch])
 
   // If the admin switches MetaMask accounts mid-session, clear any stale "wrong wallet" error
   // so the next click re-checks fresh instead of showing an outdated message.
@@ -82,21 +172,23 @@ export function IssuedCertificatesPage() {
     return unsubscribe
   }, [])
 
-  const filteredCertificates = certificates.filter((cert) => {
-    const term = searchTerm.toLowerCase()
-    const matchesSearch =
-      !term || cert.studentName?.toLowerCase().includes(term) || cert.studentUsn?.toLowerCase().includes(term)
-    const matchesStatus = statusFilter === 'All' || cert.status === statusFilter
-    return matchesSearch && matchesStatus
-  })
+  const onSearchSubmit = (e) => {
+    e.preventDefault()
+    setAppliedSearch(searchInput.trim())
+  }
 
-  const recentActivity = [...certificates]
-    .sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt))
-    .slice(0, 4)
+  const selectDepartment = (code) => {
+    setSelectedDepartment(code)
+  }
 
   const applyUpdatedCertificate = (updated) => {
     setCertificates((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
     setSelectedCertificate((prev) => (prev && prev.id === updated.id ? updated : prev))
+    // The certificate's status just changed — the department dashboard counts (Pending/Minted/
+    // Revoked) are now stale, so refresh them from the real DB values rather than guessing.
+    if (selectedDepartment) {
+      getDepartmentSummary(selectedDepartment).then(setDeptSummary).catch(() => {})
+    }
   }
 
   const handleRevoke = async (cert) => {
@@ -256,15 +348,12 @@ export function IssuedCertificatesPage() {
     setSelectedCertificate(cert)
   }
 
-  const totalCount = certificates.length
-  const revokedCount = certificates.filter((c) => c.status === 'REVOKED').length
-  const pendingMintCount = certificates.filter((c) => c.status === 'PENDING_MINT').length
-  const mintedCount = certificates.filter((c) => c.status === 'MINTED').length
+  const departmentLabel = (code) => departments.find((d) => d.code === code)?.label ?? code
 
   return (
     <section className="min-h-screen bg-gradient-to-br from-gray-50 to-white py-14 sm:py-16">
       <div className="mx-auto max-w-[1200px] px-5 lg:px-10">
-        <PageHeader title="Issued Certificates" subtitle="Manage and monitor all issued degree certificates" />
+        <PageHeader title="Certificate Registry" subtitle="Manage and monitor issued degree certificates by department" />
 
         {loadError && (
           <Alert variant="error" title="Could not load certificates" className="mb-6">
@@ -277,97 +366,69 @@ export function IssuedCertificatesPage() {
           </Alert>
         )}
 
-        {/* Stats Cards */}
-        <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {loading ? (
-            Array.from({ length: 4 }).map((_, i) => <SkeletonStatCard key={i} />)
-          ) : (
-            <>
-              <StatCard
-                label="Total Certificates"
-                value={totalCount}
-                iconBgClassName="bg-blue-100 text-blue-600"
-                icon={
-                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                }
-              />
-              <StatCard
-                label="Minted"
-                value={mintedCount}
-                valueClassName="text-green-600"
-                iconBgClassName="bg-green-100 text-green-600"
-                delay={0.05}
-                icon={
-                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                }
-              />
-              <StatCard
-                label="Pending Mint"
-                value={pendingMintCount}
-                valueClassName="text-amber-600"
-                iconBgClassName="bg-amber-100 text-amber-600"
-                delay={0.1}
-                icon={
-                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                }
-              />
-              <StatCard
-                label="Revoked"
-                value={revokedCount}
-                valueClassName="text-red-600"
-                iconBgClassName="bg-red-100 text-red-600"
-                delay={0.15}
-                icon={
-                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                }
-              />
-            </>
-          )}
+        {/* Department switcher */}
+        <div className="mb-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => selectDepartment('')}
+            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+              selectedDepartment === ''
+                ? 'border-kredent-navy bg-kredent-navy text-white'
+                : 'border-gray-300 bg-white text-gray-700 hover:border-kredent-navy/50'
+            }`}
+          >
+            All Departments
+          </button>
+          {departments.map((dept) => (
+            <button
+              key={dept.code}
+              type="button"
+              onClick={() => selectDepartment(dept.code)}
+              className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                selectedDepartment === dept.code
+                  ? 'border-kredent-accent bg-kredent-accent text-white'
+                  : 'border-gray-300 bg-white text-gray-700 hover:border-kredent-accent/50'
+              }`}
+            >
+              {dept.code}
+            </button>
+          ))}
         </div>
 
-        {/* Dashboard preview row: chart placeholder + recent activity */}
-        <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-[1.4fr_1fr]">
-          <Card className="p-6">
-            <h3 className="mb-4 text-sm font-semibold text-gray-700">Certificates Issued Over Time</h3>
-            <ChartPlaceholder label="Analytics will appear here once charting is wired up" />
-          </Card>
-
-          <Card className="p-6">
-            <h3 className="mb-4 text-sm font-semibold text-gray-700">Recent Activity</h3>
-            <ul className="space-y-4">
-              {recentActivity.map((cert) => (
-                <li key={cert.id} className="flex items-start gap-3">
-                  <div
-                    className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${
-                      cert.status === 'REVOKED' ? 'bg-red-500' : 'bg-green-500'
-                    }`}
-                  />
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-gray-800">
-                      {cert.status === 'REVOKED' ? 'Revoked for' : 'Issued to'} {cert.studentName}
-                    </p>
-                    <p className="text-xs text-gray-500">{cert.issuedAt?.slice(0, 10)}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </div>
+        {/* Department dashboard — real, DB-computed counts only */}
+        {selectedDepartment && (
+          <div className="mb-8">
+            {deptSummaryError && (
+              <Alert variant="error" title="Could not load department summary" className="mb-4">
+                {deptSummaryError}
+              </Alert>
+            )}
+            <div className="mb-3 flex items-baseline gap-2">
+              <h2 className="font-serif text-xl font-bold text-kredent-navy">{departmentLabel(selectedDepartment)}</h2>
+              <span className="text-sm text-gray-500">({selectedDepartment})</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+              {!deptSummary ? (
+                Array.from({ length: 5 }).map((_, i) => <SkeletonStatCard key={i} />)
+              ) : (
+                <>
+                  <StatCard label="Total Students" value={deptSummary.totalStudents} iconBgClassName="bg-blue-100 text-blue-600" icon={<UsersIcon />} />
+                  <StatCard label="Certificates Issued" value={deptSummary.totalCertificates} iconBgClassName="bg-indigo-100 text-indigo-600" icon={<DocIcon />} delay={0.05} />
+                  <StatCard label="Pending" value={deptSummary.pendingMint} valueClassName="text-amber-600" iconBgClassName="bg-amber-100 text-amber-600" icon={<ClockIcon />} delay={0.1} />
+                  <StatCard label="Minted" value={deptSummary.minted} valueClassName="text-green-600" iconBgClassName="bg-green-100 text-green-600" icon={<CheckIcon />} delay={0.15} />
+                  <StatCard label="Revoked" value={deptSummary.revoked} valueClassName="text-red-600" iconBgClassName="bg-red-100 text-red-600" icon={<XIcon />} delay={0.2} />
+                </>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Main Table Card */}
         <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, delay: 0.1 }}>
           <Card>
             <CardHeader
-              title="Certificate Registry"
-              subtitle="All issued degree records"
+              title="Certificate Records"
+              subtitle={loading ? 'Loading…' : `${pageInfo.totalElements} certificate${pageInfo.totalElements === 1 ? '' : 's'}`}
               icon={
                 <svg className="h-6 w-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v1a1 1 0 001 1h4a1 1 0 001-1v-1m3-2V8a2 2 0 00-2-2H8a2 2 0 00-2 2v8m5-4h4" />
@@ -391,26 +452,34 @@ export function IssuedCertificatesPage() {
 
             {/* Search and Filter */}
             <div className="border-b border-gray-200 p-6">
-              <div className="flex flex-col gap-4 lg:flex-row">
+              <form onSubmit={onSearchSubmit} className="flex flex-col gap-4 lg:flex-row">
                 <div className="flex-1">
                   <Input
-                    placeholder="Search by student name or USN..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search by student name, USN, or certificate number..."
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
                     className="py-2.5"
                   />
                 </div>
-                <Select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="py-2.5 lg:w-48"
-                >
-                  <option value="All">All Status</option>
+                <Select value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} className="py-2.5 lg:w-40">
+                  <option value="">All Years</option>
+                  {YEAR_OPTIONS.map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </Select>
+                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="py-2.5 lg:w-48">
+                  <option value="">All Status</option>
                   <option value="PENDING_MINT">Pending Mint</option>
                   <option value="MINTED">Minted</option>
+                  <option value="MINT_FAILED">Mint Failed</option>
                   <option value="REVOKED">Revoked</option>
                 </Select>
-              </div>
+                <Button type="submit" variant="outline">
+                  Search
+                </Button>
+              </form>
             </div>
 
             {/* Table */}
@@ -428,13 +497,13 @@ export function IssuedCertificatesPage() {
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {loading ? (
-                    Array.from({ length: 4 }).map((_, i) => <SkeletonRow key={i} columns={6} />)
-                  ) : filteredCertificates.length === 0 ? (
+                    Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} columns={6} />)
+                  ) : certificates.length === 0 ? (
                     <tr>
                       <td colSpan={6}>
                         <EmptyState
                           title="No certificates found"
-                          description="Try a different search term or status filter."
+                          description="Try a different search term, department, year, or status filter."
                           icon={
                             <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -444,7 +513,7 @@ export function IssuedCertificatesPage() {
                       </td>
                     </tr>
                   ) : (
-                    filteredCertificates.map((cert, idx) => (
+                    certificates.map((cert, idx) => (
                       <motion.tr
                         key={cert.id}
                         initial={{ opacity: 0, y: 12 }}
@@ -461,7 +530,9 @@ export function IssuedCertificatesPage() {
                         <td className="px-6 py-4">
                           <code className="rounded bg-gray-100 px-2 py-1 font-mono text-sm text-gray-700">{cert.studentUsn}</code>
                         </td>
-                        <td className="px-6 py-4 text-sm text-gray-700">{cert.department}</td>
+                        <td className="px-6 py-4">
+                          <Badge variant="info">{cert.department}</Badge>
+                        </td>
                         <td className="px-6 py-4 text-sm text-gray-700">{cert.yearOfCompletion}</td>
                         <td className="px-6 py-4">
                           <Badge variant={statusMeta(cert.status).variant}>{statusMeta(cert.status).label}</Badge>
@@ -508,6 +579,16 @@ export function IssuedCertificatesPage() {
                 </tbody>
               </table>
             </div>
+
+            {!loading && (
+              <Pagination
+                page={pageInfo.page}
+                totalPages={pageInfo.totalPages}
+                totalElements={pageInfo.totalElements}
+                pageSize={PAGE_SIZE}
+                onPageChange={loadCertificates}
+              />
+            )}
           </Card>
         </motion.div>
 
@@ -687,5 +768,45 @@ export function IssuedCertificatesPage() {
         </Modal>
       </div>
     </section>
+  )
+}
+
+function UsersIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+    </svg>
+  )
+}
+
+function DocIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  )
+}
+
+function ClockIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  )
+}
+
+function XIcon() {
+  return (
+    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
   )
 }

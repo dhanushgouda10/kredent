@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { Link } from 'react-router-dom'
 import heroVisual from '../../assets/images/home-stats.png'
 import { Button } from '../ui'
 
@@ -47,18 +48,30 @@ export function HeroSection() {
           </motion.p>
 
           <motion.div
-            className="flex flex-wrap gap-4 pt-2"
+            className="flex flex-wrap items-center gap-4 pt-2"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
           >
             <Button to="/verify" variant="primary" size="lg">
-              Verify Degree
+              Verify a Certificate
             </Button>
-            <Button to="/admin/login" variant="outline" size="lg">
-              Admin Login
+            <Button to="/login" variant="outline" size="lg">
+              Student Login
             </Button>
           </motion.div>
+
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="pt-1 text-sm text-gray-500"
+          >
+            College administrator?{' '}
+            <Link to="/admin/login" className="font-medium text-kredent-navy underline-offset-2 hover:underline">
+              Sign in here
+            </Link>
+          </motion.p>
         </motion.div>
 
         {/* Right Side - Image Card */}

@@ -5,15 +5,18 @@ import { StudentLayout } from './components/layout/StudentLayout'
 import { ProtectedRoute } from './components/layout/ProtectedRoute'
 import { HomePage } from './pages/HomePage'
 import { VerifyDegreePage } from './pages/VerifyDegreePage'
-import { CertificatePage } from './pages/CertificatePage'
+import { VerifyResultPage } from './pages/VerifyResultPage'
 import { LoginSignupPage } from './pages/LoginSignupPage'
 import { AdminLoginPage } from './pages/AdminLoginPage'
+import { AdminStudentsPage } from './pages/AdminStudentsPage'
 import { IssueDegreePage } from './pages/IssueDegreePage'
 import { IssuedCertificatesPage } from './pages/IssuedCertificatesPage'
+import { AuditLogsPage } from './pages/AuditLogsPage'
 import { StudentDashboardPage } from './pages/student/StudentDashboardPage'
 import { MyCertificatesPage } from './pages/student/MyCertificatesPage'
 import { StudentCertificateDetailPage } from './pages/student/StudentCertificateDetailPage'
 import { StudentProfilePage } from './pages/student/StudentProfilePage'
+import { NotFoundPage } from './pages/NotFoundPage'
 
 function App() {
   return (
@@ -21,9 +24,10 @@ function App() {
       <Route element={<MainLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/verify" element={<VerifyDegreePage />} />
-        <Route path="/certificate" element={<CertificatePage />} />
+        <Route path="/verify/:certificateNumber" element={<VerifyResultPage />} />
         <Route path="/login" element={<LoginSignupPage />} />
         <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
       <Route
         path="/admin"
@@ -34,8 +38,10 @@ function App() {
         }
       >
         <Route index element={<Navigate to="/admin/issue-degree" replace />} />
+        <Route path="students" element={<AdminStudentsPage />} />
         <Route path="issue-degree" element={<IssueDegreePage />} />
         <Route path="issued-certificates" element={<IssuedCertificatesPage />} />
+        <Route path="audit-logs" element={<AuditLogsPage />} />
       </Route>
       <Route
         path="/student"

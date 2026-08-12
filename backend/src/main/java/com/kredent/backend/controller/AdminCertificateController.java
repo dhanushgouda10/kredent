@@ -6,6 +6,7 @@ import com.kredent.backend.dto.IssueBlockchainRequest;
 import com.kredent.backend.dto.PageResponse;
 import com.kredent.backend.dto.RevokeBlockchainRequest;
 import com.kredent.backend.dto.UpdateCertificateStatusRequest;
+import com.kredent.backend.entity.CertificateStatus;
 import com.kredent.backend.service.CertificateService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.PageRequest;
@@ -46,9 +47,18 @@ public class AdminCertificateController {
     @GetMapping("/certificates")
     public ResponseEntity<PageResponse<CertificateResponse>> listAll(
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String department,
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) CertificateStatus status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("issuedAt").descending());
+        // department/year/status are the Certificate Registry's filter strip — all optional, all
+        // applied server-side (CertificateService.listFiltered). Falls back to the plain
+        // search-only path when none of them are set, so existing callers keep working unchanged.
+        if (department != null || year != null || status != null) {
+            return ResponseEntity.ok(certificateService.listFiltered(department, year, status, search, pageable));
+        }
         return ResponseEntity.ok(certificateService.listAll(search, pageable));
     }
 

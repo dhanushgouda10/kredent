@@ -14,6 +14,17 @@ export async function registerStudent(body) {
   return res.json()
 }
 
+// GET /api/auth/departments — public, unauthenticated. Populates the department dropdown on the
+// self-registration form with the same canonical catalog (code + label, no student counts) the
+// backend validates registrations against — see AuthService.register.
+export async function listPublicDepartments() {
+  const res = await fetch(`${API_BASE}/api/auth/departments`)
+  if (!res.ok) {
+    throw new Error(await parseErrorMessage(res))
+  }
+  return res.json()
+}
+
 export async function loginStudent(body) {
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',

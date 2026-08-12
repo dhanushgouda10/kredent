@@ -75,6 +75,26 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>2.5.0</version>
         </dependency>
+        <!-- Phase 11 (QR stamping): pure-Java, no native/system dependencies. PDFBox overlays the
+             QR image onto the admin-uploaded PDF (util/PdfStampingService); ZXing generates that
+             QR image from the public verification URL (util/QrCodeUtil). Both run entirely
+             server-side against the uploaded bytes before hashing — no template engine, no
+             student-photo storage, no change to how the admin's PDF looks otherwise. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>2.0.31</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>javase</artifactId>
+            <version>3.5.3</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

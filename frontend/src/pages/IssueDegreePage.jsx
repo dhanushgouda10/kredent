@@ -1,18 +1,30 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useNavigate } from 'react-router-dom'
-import { Alert, Button, Card, CardHeader, Input, PageHeader, Select } from '../components/ui'
-import { createCertificate, searchStudents, uploadCertificateFile } from '../services/certificateService'
+import { Alert, Badge, Button, Card, CardHeader, Input, PageHeader, Select } from '../components/ui'
+import { createCertificate, uploadCertificateFile } from '../services/certificateService'
+import { listDepartments } from '../services/departmentService'
+import { listStudents } from '../services/adminStudentService'
+
+// Generous upper bound for a single department's roster in this plain <select> — not a real
+// pagination limit, just large enough that no realistic department's student count gets
+// truncated. The query itself is still server-side and department-scoped (StudentService
+// .listStudentsByDepartment via GET /api/admin/students?department=...), never an unfiltered
+// fetch-everything-then-filter-in-the-browser.
+const STUDENT_LIST_SIZE = 500
 
 export function IssueDegreePage() {
+  const [selectedDepartment, setSelectedDepartment] = useState('')
   const [students, setStudents] = useState([])
-  const [studentsLoading, setStudentsLoading] = useState(true)
+  const [studentsLoading, setStudentsLoading] = useState(false)
   const [studentsError, setStudentsError] = useState('')
+
+  const [departments, setDepartments] = useState([])
+  const [departmentsError, setDepartmentsError] = useState('')
 
   const [formData, setFormData] = useState({
     studentId: '',
     degreeName: '',
-    department: '',
     yearOfCompletion: '',
   })
   const [file, setFile] = useState(null)
@@ -23,23 +35,83 @@ export function IssueDegreePage() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    // studentsLoading already starts as true, so no synchronous setState here — this
-    // effect only needs to flip it off (or set an error) once the fetch settles.
     let cancelled = false
-    searchStudents('')
-      .then((page) => {
-        if (!cancelled) setStudents(page.content ?? [])
+    listDepartments()
+      .then((list) => {
+        if (!cancelled) {
+          setDepartments(list)
+          setDepartmentsError('')
+        }
       })
       .catch((err) => {
-        if (!cancelled) setStudentsError(err.message || 'Could not load students')
-      })
-      .finally(() => {
-        if (!cancelled) setStudentsLoading(false)
+        if (!cancelled) setDepartmentsError(err.message || 'Could not load departments')
       })
     return () => {
       cancelled = true
     }
   }, [])
+
+  // Loads ONLY the students belonging to the selected department, via the existing server-side
+  // department filter (GET /api/admin/students?department=...) — never an unfiltered fetch
+  // filtered client-side. Re-runs every time the department changes; with no department selected
+  // there is nothing to fetch, so the student list is just cleared.
+  //
+  // Every setState call here happens inside a .then()/.catch()/.finally() callback rather than
+  // synchronously in the effect body, to satisfy react-hooks/set-state-in-effect — the same
+  // pattern used by the department-driven effects on the Students and Certificate Registry pages.
+  // One accepted trade-off from that pattern: switching departments doesn't show a fresh loading
+  // skeleton on frame one, the list just swaps in once the fetch resolves.
+  useEffect(() => {
+    let cancelled = false
+
+    if (!selectedDepartment) {
+      Promise.resolve().then(() => {
+        if (!cancelled) {
+          setStudents([])
+          setStudentsError('')
+          setStudentsLoading(false)
+        }
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+
+    Promise.resolve()
+      .then(() => {
+        if (!cancelled) setStudentsLoading(true)
+      })
+      .then(() => listStudents({ department: selectedDepartment, size: STUDENT_LIST_SIZE }))
+      .then((page) => {
+        if (!cancelled) {
+          setStudents(page.content ?? [])
+          setStudentsError('')
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setStudentsError(err.message || 'Could not load students for this department')
+      })
+      .finally(() => {
+        if (!cancelled) setStudentsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedDepartment])
+
+  const selectedStudent = students.find((s) => String(s.id) === String(formData.studentId)) ?? null
+  const departmentLabel = (code) => departments.find((d) => d.code === code)?.label ?? code
+  const noStudentsInDepartment =
+    Boolean(selectedDepartment) && !studentsLoading && !studentsError && students.length === 0
+
+  const handleDepartmentChange = (e) => {
+    // Selecting a new department invalidates whatever student was previously chosen (it very
+    // likely doesn't belong to the new department at all) — clear it so the form can never submit
+    // a student/department combination that doesn't match what's shown.
+    setSelectedDepartment(e.target.value)
+    setFormData((prev) => ({ ...prev, studentId: '' }))
+  }
 
   const handleInputChange = (e) => {
     setFormData({
@@ -64,11 +136,13 @@ export function IssueDegreePage() {
 
     setIsIssuing(true)
     try {
-      // Step 1: create the certificate metadata row.
+      // Step 1: create the certificate metadata row. Department is intentionally NOT sent here —
+      // the backend always derives it from the selected student's own department
+      // (CertificateService.createMetadata), so a certificate can never disagree with the
+      // student it belongs to.
       const certificate = await createCertificate({
         studentId: Number(formData.studentId),
         degreeName: formData.degreeName,
-        department: formData.department,
         yearOfCompletion: Number(formData.yearOfCompletion),
       })
 
@@ -76,7 +150,7 @@ export function IssueDegreePage() {
       const withFile = await uploadCertificateFile(certificate.id, file)
 
       setIssuedCertificate(withFile)
-      setFormData({ studentId: '', degreeName: '', department: '', yearOfCompletion: '' })
+      setFormData({ studentId: '', degreeName: '', yearOfCompletion: '' })
       setFile(null)
       e.target.reset()
     } catch (err) {
@@ -114,30 +188,61 @@ export function IssueDegreePage() {
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                     <Select
+                      label="Department"
+                      name="department"
+                      value={selectedDepartment}
+                      onChange={handleDepartmentChange}
+                      required
+                      containerClassName="md:col-span-2"
+                      disabled={departments.length === 0 && !departmentsError}
+                      hint={departmentsError ? 'Could not load departments — please refresh.' : 'Choose a department to load its students below.'}
+                    >
+                      <option value="">{departments.length === 0 && !departmentsError ? 'Loading departments…' : 'Select Department'}</option>
+                      {departments.map((dept) => (
+                        <option key={dept.code} value={dept.code}>
+                          {dept.code} — {dept.label}
+                        </option>
+                      ))}
+                    </Select>
+
+                    <Select
                       label="Student"
                       name="studentId"
                       value={formData.studentId}
                       onChange={handleInputChange}
                       required
                       containerClassName="md:col-span-2"
-                      disabled={studentsLoading}
+                      disabled={!selectedDepartment || studentsLoading || noStudentsInDepartment}
                     >
-                      <option value="">{studentsLoading ? 'Loading students…' : 'Select Student'}</option>
+                      <option value="">
+                        {!selectedDepartment
+                          ? 'Select a department first'
+                          : studentsLoading
+                            ? 'Loading students…'
+                            : noStudentsInDepartment
+                              ? 'No students registered in this department yet'
+                              : 'Select Student'}
+                      </option>
                       {students.map((student) => (
                         <option key={student.id} value={student.id}>
-                          {student.fullName} — {student.usn} ({student.department})
+                          {student.fullName} — {student.usn}
                         </option>
                       ))}
                     </Select>
 
-                    <Select label="Department" name="department" value={formData.department} onChange={handleInputChange} required>
-                      <option value="">Select Department</option>
-                      <option value="Computer Science">Computer Science</option>
-                      <option value="Electronics & Communication">Electronics &amp; Communication</option>
-                      <option value="Mechanical Engineering">Mechanical Engineering</option>
-                      <option value="Civil Engineering">Civil Engineering</option>
-                      <option value="Electrical Engineering">Electrical Engineering</option>
-                    </Select>
+                    <div>
+                      <p className="mb-1.5 text-sm font-medium text-gray-700">Confirmed Department</p>
+                      <div className="flex h-[46px] items-center rounded-lg border border-gray-200 bg-gray-50 px-4">
+                        {selectedStudent ? (
+                          <Badge variant="info">
+                            {selectedStudent.department} — {departmentLabel(selectedStudent.department)}
+                          </Badge>
+                        ) : (
+                          <span className="text-sm text-gray-400">Select a student to confirm department</span>
+                        )}
+                      </div>
+                      <p className="mt-1.5 text-xs text-gray-500">Always taken from the student's own record — cannot be changed here.</p>
+                    </div>
 
                     <Input
                       label="Year of Completion"
@@ -205,20 +310,28 @@ export function IssueDegreePage() {
                 {/* Success Message */}
                 {issuedCertificate && (
                   <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-6">
-                    <Alert variant="success" title="Certificate Issued Successfully!">
-                      <div className="mt-2 space-y-2 text-sm">
+                    <Alert variant="success" title="Certificate Record Created">
+                      <div className="mt-2 space-y-3 text-sm">
+                        <p className="text-green-700">
+                          The certificate for <span className="font-medium">{issuedCertificate.studentName}</span> (
+                          {issuedCertificate.studentUsn}) has been created and the signed PDF has been secured — a
+                          verification QR code was generated and stamped onto the document.
+                        </p>
                         <p className="text-green-700">
                           <span className="font-medium">Certificate Number:</span> {issuedCertificate.certificateNumber}
                         </p>
                         <p className="text-green-700">
-                          <span className="font-medium">Student:</span> {issuedCertificate.studentName} ({issuedCertificate.studentUsn})
+                          This record still needs to be issued on the blockchain before it's final. Go to{' '}
+                          <span className="font-medium">Issued Certificates</span> to complete that step.
                         </p>
-                        <p className="text-green-700">
-                          <span className="font-medium">SHA-256 File Hash:</span>
-                        </p>
-                        <div className="rounded border border-green-300 bg-white p-2">
-                          <code className="break-all text-xs text-green-800">{issuedCertificate.fileHash}</code>
-                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => navigate('/admin/issued-certificates')}
+                        >
+                          Go to Issued Certificates
+                        </Button>
                       </div>
                     </Alert>
                   </motion.div>

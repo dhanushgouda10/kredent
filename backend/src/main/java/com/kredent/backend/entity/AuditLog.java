@@ -49,6 +49,23 @@ public class AuditLog {
     @Column(name = "entity_id")
     private String entityId;
 
+    // Denormalized at write time (see AuditLogService.record) purely so the admin Audit Logs
+    // page can filter/search at the database level once there are thousands of rows, instead of
+    // fetching a capped page and filtering client-side, or re-resolving every certificate/student
+    // per row on every read. Nullable — rows written before these columns existed simply have no
+    // value here; AuditLogService.toResponse() falls back to its original live-lookup for those.
+    @Column(name = "certificate_number")
+    private String certificateNumber;
+
+    @Column(name = "student_name")
+    private String studentName;
+
+    @Column(name = "student_usn")
+    private String studentUsn;
+
+    @Column(name = "department")
+    private String department;
+
     @Column(columnDefinition = "text")
     private String metadata;
 
@@ -109,6 +126,38 @@ public class AuditLog {
 
     public void setEntityId(String entityId) {
         this.entityId = entityId;
+    }
+
+    public String getCertificateNumber() {
+        return certificateNumber;
+    }
+
+    public void setCertificateNumber(String certificateNumber) {
+        this.certificateNumber = certificateNumber;
+    }
+
+    public String getStudentName() {
+        return studentName;
+    }
+
+    public void setStudentName(String studentName) {
+        this.studentName = studentName;
+    }
+
+    public String getStudentUsn() {
+        return studentUsn;
+    }
+
+    public void setStudentUsn(String studentUsn) {
+        this.studentUsn = studentUsn;
+    }
+
+    public String getDepartment() {
+        return department;
+    }
+
+    public void setDepartment(String department) {
+        this.department = department;
     }
 
     public String getMetadata() {

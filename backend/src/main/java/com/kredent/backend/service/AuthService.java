@@ -7,6 +7,7 @@ import com.kredent.backend.entity.Role;
 import com.kredent.backend.entity.Student;
 import com.kredent.backend.repository.StudentRepository;
 import com.kredent.backend.security.JwtService;
+import com.kredent.backend.util.DepartmentCatalog;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,10 @@ public class AuthService {
         }
         if (studentRepository.existsByUsn(request.getUsn())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "USN already exists");
+        }
+        if (!DepartmentCatalog.isValidCode(request.getDepartment())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unknown department: " + request.getDepartment() + ". Choose one of the listed departments.");
         }
 
         Student student = new Student();

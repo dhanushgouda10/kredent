@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { loginStudent, registerStudent } from '../services/authService'
+import { listPublicDepartments, loginStudent, registerStudent } from '../services/authService'
 import { useAuth } from '../context/useAuth'
 import { Alert, Button, Input, PasswordInput, Select } from '../components/ui'
 
@@ -9,16 +9,14 @@ export function LoginSignupPage() {
   const [activeTab, setActiveTab] = useState('register')
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState(null)
+  const [departments, setDepartments] = useState([])
+  const [departmentsError, setDepartmentsError] = useState('')
   const [formData, setFormData] = useState({
     name: '',
     usn: '',
     email: '',
     mobile: '',
-    otp: '',
-    state: '',
-    city: '',
-    program: '',
-    course: '',
+    department: '',
     password: '',
     confirmPassword: '',
     agreeTerms: false,
@@ -26,30 +24,27 @@ export function LoginSignupPage() {
   const navigate = useNavigate()
   const { login } = useAuth()
 
-  const states = [
-    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
-    'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand',
-    'Karnataka', 'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur',
-    'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab',
-    'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura',
-    'Uttar Pradesh', 'Uttarakhand', 'West Bengal', 'Delhi', 'Others'
-  ]
-
-  const programs = ['Engineering', 'Management', 'Science', 'Arts', 'Commerce', 'Others']
-  const courses = ['B.Tech', 'M.Tech', 'MBA', 'MCA', 'B.Sc', 'M.Sc', 'B.Com', 'M.Com', 'Others']
+  useEffect(() => {
+    let cancelled = false
+    listPublicDepartments()
+      .then((list) => {
+        if (!cancelled) setDepartments(list)
+      })
+      .catch((err) => {
+        if (!cancelled) setDepartmentsError(err.message || 'Could not load departments')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target
     setFormError(null)
     setFormData({
       ...formData,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: type === 'checkbox' ? checked : value,
     })
-  }
-
-  const departmentSummary = () => {
-    const parts = [formData.program, formData.course].filter(Boolean)
-    return parts.length ? parts.join(' · ') : ''
   }
 
   const handleSubmit = async (e) => {
@@ -68,7 +63,7 @@ export function LoginSignupPage() {
           usn: formData.usn.trim(),
           email: formData.email.trim(),
           phone: formData.mobile.trim(),
-          department: departmentSummary() || 'General',
+          department: formData.department,
           password: formData.password,
         })
         setActiveTab('login')
@@ -107,7 +102,7 @@ export function LoginSignupPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="w-full max-w-2xl"
+        className="w-full max-w-md"
       >
         {/* Logo */}
         <div className="mb-6 text-center">
@@ -115,7 +110,7 @@ export function LoginSignupPage() {
             <img src="/MVJCE_-_New_Logo.png" alt="Kredent logo" className="mr-4 h-16 w-16 object-contain sm:h-20 sm:w-20" />
             <div className="text-left">
               <h1 className="font-serif text-3xl font-bold text-gray-900 sm:text-4xl">KREDENT</h1>
-              <p className="text-xs tracking-wider text-gray-600 sm:text-sm">MVJCE BLOCKCHAIN VERIFICATION</p>
+              <p className="text-xs tracking-wider text-gray-600 sm:text-sm">MVJCE STUDENT PORTAL</p>
             </div>
           </div>
         </div>
@@ -161,7 +156,7 @@ export function LoginSignupPage() {
             <form onSubmit={handleSubmit} className="space-y-4">
               {activeTab === 'register' ? (
                 <>
-                  <Input label="Name" name="name" value={formData.name} onChange={handleInputChange} required placeholder="Enter your name" />
+                  <Input label="Full Name" name="name" value={formData.name} onChange={handleInputChange} required placeholder="Enter your full name" />
 
                   <Input
                     label="USN"
@@ -183,43 +178,32 @@ export function LoginSignupPage() {
                     placeholder="Enter your email"
                   />
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="Mobile Number"
-                      type="tel"
-                      name="mobile"
-                      value={formData.mobile}
-                      onChange={handleInputChange}
-                      required
-                      placeholder="Enter mobile"
-                    />
-                    <Input label="OTP" name="otp" value={formData.otp} onChange={handleInputChange} required placeholder="Enter OTP" />
-                  </div>
+                  <Input
+                    label="Mobile Number"
+                    type="tel"
+                    name="mobile"
+                    value={formData.mobile}
+                    onChange={handleInputChange}
+                    required
+                    placeholder="Enter mobile number"
+                  />
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <Select label="State" name="state" value={formData.state} onChange={handleInputChange} required>
-                      <option value="">Select State</option>
-                      {states.map((state) => (
-                        <option key={state} value={state}>{state}</option>
-                      ))}
-                    </Select>
-                    <Input label="City" name="city" value={formData.city} onChange={handleInputChange} required placeholder="Enter city" />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <Select label="Program" name="program" value={formData.program} onChange={handleInputChange} required>
-                      <option value="">Select Program</option>
-                      {programs.map((program) => (
-                        <option key={program} value={program}>{program}</option>
-                      ))}
-                    </Select>
-                    <Select label="Course" name="course" value={formData.course} onChange={handleInputChange} required>
-                      <option value="">Select Course</option>
-                      {courses.map((course) => (
-                        <option key={course} value={course}>{course}</option>
-                      ))}
-                    </Select>
-                  </div>
+                  <Select
+                    label="Department"
+                    name="department"
+                    value={formData.department}
+                    onChange={handleInputChange}
+                    required
+                    disabled={departments.length === 0 && !departmentsError}
+                    hint={departmentsError ? 'Could not load departments — please refresh.' : undefined}
+                  >
+                    <option value="">{departments.length === 0 && !departmentsError ? 'Loading departments…' : 'Select Department'}</option>
+                    {departments.map((dept) => (
+                      <option key={dept.code} value={dept.code}>
+                        {dept.code} — {dept.label}
+                      </option>
+                    ))}
+                  </Select>
 
                   <PasswordInput
                     label="Password"
@@ -273,35 +257,10 @@ export function LoginSignupPage() {
                     required
                     placeholder="Enter your password"
                   />
-
-                  <div className="flex items-center justify-between">
-                    <label className="flex items-center">
-                      <input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-kredent-accent focus:ring-kredent-accent" />
-                      <span className="ml-2 text-sm text-gray-600">Remember me</span>
-                    </label>
-                    <a href="#" className="text-sm text-kredent-accent hover:underline">
-                      Forgot password?
-                    </a>
-                  </div>
                 </>
               )}
 
               {formError && <Alert variant="error">{formError}</Alert>}
-
-              {/* Captcha */}
-              <div className="rounded-lg border border-gray-300 bg-gray-50 p-4">
-                <div className="flex items-center justify-between">
-                  <div className="font-mono text-lg tracking-widest text-gray-700">A3B7K9</div>
-                  <button type="button" className="rounded text-sm text-gray-500 transition hover:text-gray-700">
-                    ↻ Refresh
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  placeholder="Enter captcha"
-                  className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-2 transition focus:border-kredent-navy focus:outline-none focus:ring-2 focus:ring-kredent-navy/25"
-                />
-              </div>
 
               <Button type="submit" variant="accent" fullWidth loading={submitting} size="lg">
                 {submitting ? 'Please wait…' : activeTab === 'register' ? 'Register' : 'Login'}

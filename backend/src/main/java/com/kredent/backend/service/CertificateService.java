@@ -48,7 +48,9 @@ public class CertificateService {
     private final AuditLogService auditLogService;
     private final SupabaseStorageService storageService;
     private final BlockchainVerificationService blockchainVerificationService;
+    private final PdfStampingService pdfStampingService;
     private final long maxFileSizeBytes;
+    private final String frontendBaseUrl;
 
     public CertificateService(
             CertificateRepository certificateRepository,
@@ -57,14 +59,18 @@ public class CertificateService {
             AuditLogService auditLogService,
             SupabaseStorageService storageService,
             BlockchainVerificationService blockchainVerificationService,
-            @Value("${app.certificate.max-file-size-mb:5}") long maxFileSizeMb) {
+            PdfStampingService pdfStampingService,
+            @Value("${app.certificate.max-file-size-mb:5}") long maxFileSizeMb,
+            @Value("${app.frontend-base-url}") String frontendBaseUrl) {
         this.certificateRepository = certificateRepository;
         this.studentRepository = studentRepository;
         this.currentUserService = currentUserService;
         this.auditLogService = auditLogService;
         this.storageService = storageService;
         this.blockchainVerificationService = blockchainVerificationService;
+        this.pdfStampingService = pdfStampingService;
         this.maxFileSizeBytes = maxFileSizeMb * 1024 * 1024;
+        this.frontendBaseUrl = frontendBaseUrl;
     }
 
     public CertificateResponse createMetadata(CertificateMetadataRequest request) {
@@ -77,7 +83,9 @@ public class CertificateService {
         certificate.setStudent(student);
         certificate.setIssuedByAdmin(admin);
         certificate.setDegreeName(request.getDegreeName());
-        certificate.setDepartment(request.getDepartment());
+        // Always the student's own department — never independently chosen — so a certificate
+        // can never disagree with the student record it belongs to (see CertificateMetadataRequest).
+        certificate.setDepartment(student.getDepartment());
         certificate.setYearOfCompletion(request.getYearOfCompletion());
         certificate.setStatus(CertificateStatus.PENDING_MINT);
         certificateRepository.save(certificate);
@@ -114,6 +122,19 @@ public class CertificateService {
         return PageResponse.from(page, CertificateResponse::from);
     }
 
+    /**
+     * Department-oriented Certificate Registry view — department, graduation year, and status
+     * are each optional (null means "any"), combined with the same free-text search as listAll()
+     * above. All filtering happens in SQL (CertificateRepository.searchFiltered), so this never
+     * pulls more than one page of rows into memory regardless of how many certificates exist.
+     */
+    public PageResponse<CertificateResponse> listFiltered(
+            String department, Integer year, CertificateStatus status, String search, Pageable pageable) {
+        String query = search == null ? "" : search.trim();
+        Page<Certificate> page = certificateRepository.searchFiltered(department, year, status, query, pageable);
+        return PageResponse.from(page, CertificateResponse::from);
+    }
+
     public PageResponse<CertificateResponse> getCertificatesForStudent(Long studentId, Pageable pageable) {
         if (!studentRepository.existsById(studentId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Student not found");
@@ -143,9 +164,25 @@ public class CertificateService {
                     "The file does not look like a valid PDF (failed signature check)");
         }
 
-        // The hash is computed from the exact bytes we just validated, before anything else
-        // touches them — this is the PDF's real fingerprint, independent of where it's stored.
-        String fileHash = HashUtil.sha256Hex(content);
+        // Phase 11: stamp a QR code (linking to the public verify page for this certificate)
+        // onto the PDF BEFORE anything below touches it. Everything that follows — hashing,
+        // dedupe check, storage — operates on the STAMPED bytes, not the raw upload. That
+        // ordering is what makes the QR forgery-resistant: it becomes part of the exact file
+        // whose hash gets stored and later minted on-chain, so a copy of the QR pasted into a
+        // different PDF produces bytes that no longer hash-match (caught by
+        // PublicVerificationService.verifyPdf).
+        String verificationUrl = frontendBaseUrl + "/verify/" + certificate.getCertificateNumber();
+        byte[] stampedContent;
+        try {
+            stampedContent = pdfStampingService.stampQrCode(content, verificationUrl);
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Could not generate the verification QR code for this certificate", e);
+        }
+
+        // The hash is computed from the exact stamped bytes that will actually be stored and
+        // served — this is the PDF's real fingerprint, independent of where it's stored.
+        String fileHash = HashUtil.sha256Hex(stampedContent);
 
         certificateRepository.findByFileHash(fileHash).ifPresent(existing -> {
             if (!existing.getId().equals(id)) {
@@ -157,12 +194,12 @@ public class CertificateService {
         String sanitizedUsn = certificate.getStudent().getUsn().replaceAll("[^A-Za-z0-9]", "");
         String objectPath = "certificates/" + sanitizedUsn + "/" + UUID.randomUUID() + ".pdf";
 
-        String fileUrl = storageService.upload(objectPath, content, FileValidationUtil.PDF_CONTENT_TYPE);
+        String fileUrl = storageService.upload(objectPath, stampedContent, FileValidationUtil.PDF_CONTENT_TYPE);
 
         certificate.setStoragePath(objectPath);
         certificate.setFileUrl(fileUrl);
         certificate.setOriginalFilename(file.getOriginalFilename());
-        certificate.setFileSizeBytes((long) content.length);
+        certificate.setFileSizeBytes((long) stampedContent.length);
         certificate.setMimeType(FileValidationUtil.PDF_CONTENT_TYPE);
         certificate.setFileHash(fileHash);
         certificate.setUploadedAt(LocalDateTime.now());
@@ -177,7 +214,7 @@ public class CertificateService {
                 id.toString(),
                 Map.of(
                         "originalFilename", String.valueOf(file.getOriginalFilename()),
-                        "fileSizeBytes", content.length,
+                        "fileSizeBytes", stampedContent.length,
                         "fileHash", fileHash
                 )
         );

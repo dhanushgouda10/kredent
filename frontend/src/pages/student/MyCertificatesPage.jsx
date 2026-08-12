@@ -105,9 +105,9 @@ export function MyCertificatesPage() {
                         <div className="flex items-center space-x-3">
                           <Link
                             to={`/student/certificates/${cert.id}`}
-                            className="rounded text-sm font-medium text-blue-600 transition-colors hover:text-blue-800"
+                            className="rounded text-sm font-medium text-kredent-accent transition-colors hover:text-orange-700"
                           >
-                            View
+                            View Details
                           </Link>
                           {cert.fileAvailable && (
                             <button
@@ -118,12 +118,6 @@ export function MyCertificatesPage() {
                               {downloadingId === cert.id ? 'Downloading…' : 'Download'}
                             </button>
                           )}
-                          <Link
-                            to={`/student/certificates/${cert.id}`}
-                            className="rounded text-sm font-medium text-kredent-accent transition-colors hover:text-orange-700"
-                          >
-                            Blockchain Details
-                          </Link>
                         </div>
                       </td>
                     </tr>

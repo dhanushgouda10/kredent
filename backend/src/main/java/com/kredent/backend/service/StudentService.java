@@ -9,6 +9,7 @@ import com.kredent.backend.entity.ActorType;
 import com.kredent.backend.entity.Admin;
 import com.kredent.backend.entity.Student;
 import com.kredent.backend.repository.StudentRepository;
+import com.kredent.backend.util.DepartmentCatalog;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -67,6 +68,23 @@ public class StudentService {
         return PageResponse.from(page, StudentResponse::from);
     }
 
+    /**
+     * Department-scoped student listing — backs the admin Students page once a department is
+     * selected. Search stays server-side and paginated even within a department, so the page
+     * never needs to fetch a whole department's roster to filter it client-side.
+     */
+    public PageResponse<StudentResponse> listStudentsByDepartment(String department, String search, Pageable pageable) {
+        String query = search == null ? "" : search.trim();
+        Page<Student> page = studentRepository.searchByDepartment(department, query, pageable);
+        return PageResponse.from(page, StudentResponse::from);
+    }
+
+    public StudentResponse getById(Long id) {
+        Student student = studentRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Student not found"));
+        return StudentResponse.from(student);
+    }
+
     public StudentResponse adminCreateStudent(RegisterRequest request) {
         if (studentRepository.existsByEmail(request.getEmail())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already exists");
@@ -74,6 +92,7 @@ public class StudentService {
         if (studentRepository.existsByUsn(request.getUsn())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "USN already exists");
         }
+        assertValidDepartment(request.getDepartment());
 
         Student student = new Student();
         student.setFullName(request.getFullName());
@@ -98,7 +117,7 @@ public class StudentService {
                 "STUDENT_CREATED",
                 "STUDENT",
                 String.valueOf(student.getId()),
-                Map.of("usn", student.getUsn(), "email", student.getEmail())
+                Map.of("usn", student.getUsn(), "email", student.getEmail(), "department", student.getDepartment())
         );
 
         return StudentResponse.from(student);
@@ -111,6 +130,7 @@ public class StudentService {
         if (!student.getEmail().equalsIgnoreCase(request.getEmail()) && studentRepository.existsByEmail(request.getEmail())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Email already in use by another student");
         }
+        assertValidDepartment(request.getDepartment());
 
         student.setFullName(request.getFullName());
         student.setEmail(request.getEmail());
@@ -125,9 +145,16 @@ public class StudentService {
                 "STUDENT_UPDATED",
                 "STUDENT",
                 String.valueOf(student.getId()),
-                Map.of("usn", student.getUsn())
+                Map.of("usn", student.getUsn(), "department", student.getDepartment())
         );
 
         return StudentResponse.from(student);
+    }
+
+    private void assertValidDepartment(String department) {
+        if (!DepartmentCatalog.isValidCode(department)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Unknown department: " + department + ". Choose one of the listed departments.");
+        }
     }
 }

@@ -52,10 +52,16 @@ export async function uploadCertificateFile(certificateId, file) {
   return res.json()
 }
 
-// GET /api/admin/certificates?search=... — the full registry for the admin table.
-export async function listCertificates({ search = '', page = 0, size = 50 } = {}) {
+// GET /api/admin/certificates?search=&department=&year=&status=&page=&size= — the Certificate
+// Registry. department/year/status are each optional; when any is set, filtering happens
+// server-side (CertificateService.listFiltered on the backend) so this never needs to fetch more
+// than one page of rows regardless of how many certificates exist.
+export async function listCertificates({ search = '', department = '', year = '', status = '', page = 0, size = 20 } = {}) {
   const params = new URLSearchParams({ page: String(page), size: String(size) })
   if (search) params.set('search', search)
+  if (department) params.set('department', department)
+  if (year) params.set('year', String(year))
+  if (status) params.set('status', status)
   const res = await fetch(`${API_BASE}/api/admin/certificates?${params.toString()}`, {
     headers: authHeaders(),
   })

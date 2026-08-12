@@ -18,22 +18,11 @@ export function AdminLoginPage() {
   const navigate = useNavigate()
   const { login } = useAuth()
 
-  /**
-   * TESTING / PRODUCTION-POLISH PHASE NOTE — read before touching this handler.
-   * Admin authentication still runs through the real, unchanged backend
-   * wallet-login flow: services/authService.js -> loginAdminWithWallet(),
-   * which calls POST /api/auth/admin/wallet-login. Nothing about that
-   * business logic or endpoint has changed.
-   *
-   * What changed is presentation only: the dedicated "Connect MetaMask" /
-   * "Wallet Connected!" two-step screen that used to render in the Card
-   * below has been parked, not deleted — see the "RESERVED FOR BLOCKCHAIN
-   * PHASE" block at the bottom of this file. For this phase, the visible
-   * flow is simply Home -> Admin Login -> Dashboard: a single "Login as
-   * Admin" button triggers the same MetaMask request + backend call
-   * silently and navigates straight to the dashboard on success, with no
-   * intermediate wallet-connection screen shown.
-   */
+  // Admin authentication runs through the real backend wallet-login flow:
+  // services/authService.js -> loginAdminWithWallet(), which calls
+  // POST /api/auth/admin/wallet-login. A single "Login as Admin" button
+  // triggers the MetaMask request + backend call and navigates to the
+  // dashboard on success.
   const handleAdminLogin = async () => {
     setLoginError(null)
 
@@ -150,100 +139,3 @@ export function AdminLoginPage() {
     </section>
   )
 }
-
-/* =============================================================================
- * RESERVED FOR BLOCKCHAIN PHASE — DO NOT DELETE
- * =============================================================================
- * This is the original "Connect MetaMask" / "Wallet Connected!" two-step
- * screen that used to render inside the Card above, between Admin Login and
- * the dashboard. It was parked here (not deleted) during the testing /
- * production-polish phase so the visible flow is Home -> Admin Login ->
- * Dashboard with no separate wallet-connection screen. handleAdminLogin()
- * above already reuses the exact same MetaMask + wallet-login logic that
- * this block used, just without the "connected" confirmation pause.
- *
- * TO RESTORE (when the blockchain phase reintroduces explicit wallet UX):
- * 1. Re-add `import { AnimatePresence } from 'framer-motion'` alongside the
- *    existing `motion` import.
- * 2. Re-add this state, next to `isLoggingIn`/`loginError`:
- *      const [isConnected, setIsConnected] = useState(false)
- *      const [walletAddress, setWalletAddress] = useState('')
- * 3. In handleAdminLogin (or a restored handleConnectMetaMask), after a
- *    successful login, set `setWalletAddress(address)` + `setIsConnected(true)`
- *    and delay the `navigate('/admin/issue-degree')` call (e.g. setTimeout
- *    1500ms) instead of navigating immediately, to give the "Connected!"
- *    state below time to be seen.
- * 4. Swap the single-state markup in the Card body above for the
- *    AnimatePresence block below.
- *
- * <AnimatePresence mode="wait">
- *   {!isConnected ? (
- *     <motion.div
- *       key="connect"
- *       initial={{ opacity: 0, y: 20 }}
- *       animate={{ opacity: 1, y: 0 }}
- *       exit={{ opacity: 0, y: -20 }}
- *       transition={{ duration: 0.2 }}
- *       className="space-y-6"
- *     >
- *       <div className="py-8 text-center">
- *         <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-orange-100">
- *           <svg className="h-12 w-12 text-kredent-accent" fill="currentColor" viewBox="0 0 24 24">
- *             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
- *           </svg>
- *         </div>
- *         <h3 className="mb-2 text-xl font-semibold text-gray-900">Connect MetaMask Wallet</h3>
- *         <p className="mb-6 text-gray-600">Use your institutional MetaMask wallet to access the admin portal</p>
- *         <Button
- *           variant="accent"
- *           size="lg"
- *           fullWidth
- *           loading={isConnecting}
- *           onClick={handleConnectMetaMask}
- *           icon={
- *             <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
- *               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
- *             </svg>
- *           }
- *         >
- *           {isConnecting ? 'Connecting…' : 'Connect MetaMask'}
- *         </Button>
- *         {connectError && (
- *           <div className="mt-4 text-left">
- *             <Alert variant="error">{connectError}</Alert>
- *           </div>
- *         )}
- *       </div>
- *       <div className="border-t border-gray-200 pt-6">
- *         <p className="text-center text-xs text-gray-500">
- *           By connecting, you agree to the MVJCE Blockchain Terms of Service
- *         </p>
- *       </div>
- *     </motion.div>
- *   ) : (
- *     <motion.div
- *       key="connected"
- *       initial={{ opacity: 0, y: 20 }}
- *       animate={{ opacity: 1, y: 0 }}
- *       exit={{ opacity: 0, y: -20 }}
- *       transition={{ duration: 0.2 }}
- *       className="space-y-6"
- *     >
- *       <div className="py-8 text-center">
- *         <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
- *           <svg className="h-8 w-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
- *             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
- *           </svg>
- *         </div>
- *         <h3 className="mb-2 text-xl font-semibold text-gray-900">Wallet Connected!</h3>
- *         <p className="mb-4 text-gray-600">Redirecting to admin dashboard…</p>
- *         <div className="rounded-lg bg-gray-50 p-4">
- *           <p className="mb-1 text-xs text-gray-500">Connected Wallet</p>
- *           <p className="break-all font-mono text-sm text-gray-800">{walletAddress}</p>
- *         </div>
- *       </div>
- *     </motion.div>
- *   )}
- * </AnimatePresence>
- * =============================================================================
- */

@@ -35,10 +35,22 @@ public class AdminStudentController {
     @GetMapping
     public ResponseEntity<PageResponse<StudentResponse>> listStudents(
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String department,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size, Sort.by("fullName").ascending());
+        // department is the Students page's primary filter — when set, this stays a fully
+        // server-side, paginated department+search query (StudentService.listStudentsByDepartment)
+        // rather than fetching a department's whole roster and filtering it in the browser.
+        if (department != null && !department.isBlank()) {
+            return ResponseEntity.ok(studentService.listStudentsByDepartment(department, search, pageable));
+        }
         return ResponseEntity.ok(studentService.listStudents(search, pageable));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<StudentResponse> getById(@PathVariable Long id) {
+        return ResponseEntity.ok(studentService.getById(id));
     }
 
     @GetMapping("/usn/{usn}")

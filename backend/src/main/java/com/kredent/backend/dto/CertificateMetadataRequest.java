@@ -9,6 +9,12 @@ import jakarta.validation.constraints.NotNull;
  * Metadata-only certificate creation — no file, no hash, no wallet, no
  * blockchain fields. Those arrive in later modules and get attached to the
  * same row.
+ *
+ * No `department` field here on purpose: a certificate's department is always taken from the
+ * selected student's own department record (CertificateService.createMetadata), never entered
+ * independently. That's a deliberate data-integrity fix — previously the admin picked a
+ * department for the certificate separately from the student's own department, which could
+ * silently disagree with each other.
  */
 public class CertificateMetadataRequest {
 
@@ -17,9 +23,6 @@ public class CertificateMetadataRequest {
 
     @NotBlank
     private String degreeName;
-
-    @NotBlank
-    private String department;
 
     @NotNull
     @Min(2000)
@@ -40,14 +43,6 @@ public class CertificateMetadataRequest {
 
     public void setDegreeName(String degreeName) {
         this.degreeName = degreeName;
-    }
-
-    public String getDepartment() {
-        return department;
-    }
-
-    public void setDepartment(String department) {
-        this.department = department;
     }
 
     public Integer getYearOfCompletion() {

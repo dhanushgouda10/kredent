@@ -4,10 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 
 const topNavItems = [
   { label: 'HOME', to: '/' },
-  { label: 'ABOUT KREDENT', to: '/about' },
-  { label: 'CONTACT', to: '/contact' },
   { label: 'VERIFY DEGREE', to: '/verify' },
-  { label: 'VIEW CERTIFICATE', to: '/certificate' },
+  { label: 'STUDENT LOGIN', to: '/login' },
 ]
 
 const sideMenuItems = [
@@ -21,15 +19,6 @@ const sideMenuItems = [
     ),
   },
   {
-    label: 'About Kredent',
-    to: '/about',
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-      </svg>
-    ),
-  },
-  {
     label: 'Verify Degree',
     to: '/verify',
     icon: (
@@ -39,20 +28,11 @@ const sideMenuItems = [
     ),
   },
   {
-    label: 'View Certificate',
-    to: '/certificate',
+    label: 'Student Login',
+    to: '/login',
     icon: (
       <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Contact',
-    to: '/contact',
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422A12.083 12.083 0 0121 15.5c0 2.5-4 4.5-9 4.5s-9-2-9-4.5a12.083 12.083 0 012.84-4.922L12 14z" />
       </svg>
     ),
   },
@@ -62,35 +42,6 @@ const sideMenuItems = [
     icon: (
       <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-      </svg>
-    ),
-  },
-]
-
-const settingsItems = [
-  {
-    label: 'Settings',
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Notifications',
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-      </svg>
-    ),
-  },
-  {
-    label: 'Help & Support',
-    icon: (
-      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 17h.008v.008H12V17z" />
       </svg>
     ),
   },
@@ -154,15 +105,6 @@ export function Navbar() {
               >
                 Admin Login
               </NavLink>
-
-              <button
-                aria-label="Search"
-                className="rounded-full p-2 transition hover:bg-white/10 active:scale-95"
-              >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </button>
 
               <button
                 onClick={toggleSideMenu}
@@ -262,20 +204,6 @@ export function Navbar() {
                       {item.icon}
                       <span className="font-medium">{item.label}</span>
                     </NavLink>
-                  ))}
-                </div>
-
-                <div className="my-6 border-t border-gray-200" />
-
-                <div className="space-y-1">
-                  {settingsItems.map((item) => (
-                    <button
-                      key={item.label}
-                      className="flex w-full items-center space-x-3 rounded-lg px-4 py-3 text-gray-700 transition hover:bg-gray-100"
-                    >
-                      {item.icon}
-                      <span className="font-medium">{item.label}</span>
-                    </button>
                   ))}
                 </div>
 
