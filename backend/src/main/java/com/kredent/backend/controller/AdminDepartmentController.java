@@ -4,7 +4,6 @@ import com.kredent.backend.dto.DepartmentResponse;
 import com.kredent.backend.dto.DepartmentSummaryResponse;
 import com.kredent.backend.service.DepartmentService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,7 +19,6 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/admin/departments")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5173"})
 public class AdminDepartmentController {
 
     private final DepartmentService departmentService;

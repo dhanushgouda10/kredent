@@ -5,7 +5,6 @@ import com.kredent.backend.dto.AuthResponse;
 import com.kredent.backend.service.AdminAuthService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,7 +12,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/auth/admin")
-@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5173"})
 public class AdminAuthController {
 
     private final AdminAuthService adminAuthService;
