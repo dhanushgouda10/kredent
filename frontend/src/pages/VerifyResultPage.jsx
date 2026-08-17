@@ -1,27 +1,56 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Alert, Button, Card, PageHeader, SkeletonLines } from '../components/ui'
+import { Alert, BackButton, Button, Card, PageHeader, SkeletonLines } from '../components/ui'
 import { verifyCertificate, verifyCertificatePdf } from '../services/verificationService'
 import { BLOCK_EXPLORER_URL } from '../contracts/skillChainConfig'
+
+// Proper stroke-SVG icons instead of emoji — emoji glyphs render inconsistently across OS/
+// browser fonts (and don't recolor to match the badge background), which reads as less
+// deliberate than the stroke icons used everywhere else in the app.
+const ICONS = {
+  check: (
+    <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4.5 12.75l6 6 9-13.5" />
+    </svg>
+  ),
+  ban: (
+    <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.25} d="M18.364 5.636a9 9 0 11-12.728 0 9 9 0 0112.728 0zM7 17L17 7" />
+    </svg>
+  ),
+  cross: (
+    <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  ),
+  question: (
+    <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.79.382-1.451 1.05-1.451 1.827v.75M12 18h.008" />
+    </svg>
+  ),
+}
 
 const PDF_RESULT_META = {
   AUTHENTIC: {
     label: 'AUTHENTIC',
-    badge: '🟢',
+    icon: ICONS.check,
     wrap: 'border-green-200 bg-green-50',
+    iconWrap: 'bg-green-500',
     textColor: 'text-green-800',
   },
   TAMPERED: {
     label: 'TAMPERED',
-    badge: '🔴',
+    icon: ICONS.cross,
     wrap: 'border-red-200 bg-red-50',
+    iconWrap: 'bg-red-500',
     textColor: 'text-red-800',
   },
   REVOKED: {
     label: 'REVOKED',
-    badge: '⚠️',
+    icon: ICONS.ban,
     wrap: 'border-amber-200 bg-amber-50',
+    iconWrap: 'bg-amber-500',
     textColor: 'text-amber-800',
   },
 }
@@ -29,28 +58,28 @@ const PDF_RESULT_META = {
 const RESULT_META = {
   VERIFIED: {
     label: 'VERIFIED',
-    badge: '✓',
+    icon: ICONS.check,
     wrap: 'border-green-200 bg-gradient-to-br from-green-50 to-emerald-50',
     badgeWrap: 'bg-green-500',
     textColor: 'text-green-800',
   },
   REVOKED: {
     label: 'REVOKED',
-    badge: '⚠',
+    icon: ICONS.ban,
     wrap: 'border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50',
     badgeWrap: 'bg-amber-500',
     textColor: 'text-amber-800',
   },
   INVALID: {
     label: 'INVALID',
-    badge: '✕',
+    icon: ICONS.cross,
     wrap: 'border-red-200 bg-gradient-to-br from-red-50 to-rose-50',
     badgeWrap: 'bg-red-500',
     textColor: 'text-red-800',
   },
   UNAVAILABLE: {
     label: 'VERIFICATION UNAVAILABLE',
-    badge: '⚠',
+    icon: ICONS.question,
     wrap: 'border-gray-200 bg-gradient-to-br from-gray-50 to-gray-100',
     badgeWrap: 'bg-gray-500',
     textColor: 'text-gray-800',
@@ -111,6 +140,7 @@ export function VerifyResultPage() {
   return (
     <section className="min-h-screen bg-gradient-to-br from-gray-50 to-white py-14 sm:py-16">
       <div className="mx-auto max-w-2xl px-5 lg:px-10">
+        <BackButton label="Back to Verification" fallbackTo="/verify" className="mb-6" />
         <PageHeader title="Kredent Certificate Verification" subtitle={`Certificate Number: ${certificateNumber}`} />
 
         {loading ? (
@@ -131,9 +161,9 @@ export function VerifyResultPage() {
             >
               <div className="flex items-center gap-4">
                 <div
-                  className={`flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full text-2xl font-bold text-white ${resultMeta(data.result).badgeWrap}`}
+                  className={`flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full text-white ${resultMeta(data.result).badgeWrap}`}
                 >
-                  {resultMeta(data.result).badge}
+                  {resultMeta(data.result).icon}
                 </div>
                 <div>
                   <p className={`text-xl font-bold ${resultMeta(data.result).textColor}`}>{resultMeta(data.result).label}</p>
@@ -281,7 +311,13 @@ export function VerifyResultPage() {
                         (PDF_RESULT_META[pdfResult.result] ?? PDF_RESULT_META.TAMPERED).wrap
                       }`}
                     >
-                      <span className="text-2xl">{(PDF_RESULT_META[pdfResult.result] ?? PDF_RESULT_META.TAMPERED).badge}</span>
+                      <div
+                        className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-white ${
+                          (PDF_RESULT_META[pdfResult.result] ?? PDF_RESULT_META.TAMPERED).iconWrap
+                        }`}
+                      >
+                        {(PDF_RESULT_META[pdfResult.result] ?? PDF_RESULT_META.TAMPERED).icon}
+                      </div>
                       <div>
                         <p className={`font-bold ${(PDF_RESULT_META[pdfResult.result] ?? PDF_RESULT_META.TAMPERED).textColor}`}>
                           {(PDF_RESULT_META[pdfResult.result] ?? PDF_RESULT_META.TAMPERED).label}

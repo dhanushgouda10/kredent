@@ -5,13 +5,13 @@ const VARIANTS = {
   primary:
     'bg-kredent-navy text-white shadow-sm hover:bg-kredent-navy-dark hover:shadow-lg disabled:bg-gray-400',
   accent:
-    'bg-kredent-accent text-white shadow-sm hover:bg-kredent-accent-dark hover:shadow-lg disabled:bg-gray-400',
+    'bg-gradient-accent text-white shadow-sm hover:shadow-lg disabled:bg-gray-400 disabled:bg-none',
   outline:
     'border-2 border-kredent-navy text-kredent-navy hover:bg-kredent-navy hover:text-white disabled:border-gray-300 disabled:text-gray-400 disabled:hover:bg-transparent',
   ghost: 'text-kredent-navy hover:bg-kredent-navy/10 disabled:text-gray-400',
   danger:
     'border-2 border-red-500 text-red-600 hover:bg-red-500 hover:text-white disabled:border-gray-300 disabled:text-gray-400',
-  pill: 'bg-kredent-accent text-white shadow-lg hover:bg-kredent-accent-dark rounded-full',
+  pill: 'bg-gradient-accent text-white shadow-lg rounded-full disabled:bg-gray-400 disabled:bg-none',
 }
 
 const SIZES = {

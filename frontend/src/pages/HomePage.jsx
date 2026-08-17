@@ -2,6 +2,7 @@ import { motion } from 'framer-motion'
 import { HeroSection } from '../components/home/HeroSection'
 import { InfoSection } from '../components/home/InfoSection'
 import { FlowSection } from '../components/home/FlowSection'
+import { TrustSection } from '../components/home/TrustSection'
 import { Button } from '../components/ui'
 import aboutImage from '../assets/images/home-about.png'
 
@@ -104,6 +105,8 @@ export function HomePage() {
       </section>
 
       <FlowSection />
+
+      <TrustSection />
     </>
   )
 }

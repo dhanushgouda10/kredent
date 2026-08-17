@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   CardHeader,
+  CopyButton,
   EmptyState,
   Input,
   Modal,
@@ -640,9 +641,10 @@ export function IssuedCertificatesPage() {
                 <div className="md:col-span-2">
                   <p className="mb-1 text-sm text-gray-600">SHA-256 File Hash</p>
                   {selectedCertificate.fileHash ? (
-                    <p className="break-all rounded bg-gray-100 p-2 font-mono text-xs text-gray-900">
-                      {selectedCertificate.fileHash}
-                    </p>
+                    <div className="flex items-start justify-between gap-2 rounded bg-gray-100 p-2">
+                      <p className="break-all font-mono text-xs text-gray-900">{selectedCertificate.fileHash}</p>
+                      <CopyButton value={selectedCertificate.fileHash} label="SHA-256 hash" />
+                    </div>
                   ) : (
                     <p className="text-sm text-gray-500 italic">No file uploaded yet</p>
                   )}
@@ -664,23 +666,31 @@ export function IssuedCertificatesPage() {
                       <div className="flex items-center justify-between">
                         <span className="text-gray-600">Blockchain Status:</span>
                         <span
-                          className={`font-semibold ${
+                          className={`inline-flex items-center gap-1.5 font-semibold ${
                             selectedCertificate.status === 'REVOKED' ? 'text-red-600' : 'text-green-600'
                           }`}
                         >
-                          {selectedCertificate.status === 'REVOKED' ? 'REVOKED' : '✅ ISSUED'}
+                          {selectedCertificate.status !== 'REVOKED' && (
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          )}
+                          {selectedCertificate.status === 'REVOKED' ? 'REVOKED' : 'ISSUED'}
                         </span>
                       </div>
                       <div>
                         <span className="mb-1 block text-gray-600">Transaction Hash:</span>
-                        <a
-                          href={`${BLOCK_EXPLORER_URL}/tx/${selectedCertificate.txHash}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="block break-all font-mono text-xs text-blue-600 hover:underline"
-                        >
-                          {selectedCertificate.txHash}
-                        </a>
+                        <div className="flex items-start justify-between gap-2">
+                          <a
+                            href={`${BLOCK_EXPLORER_URL}/tx/${selectedCertificate.txHash}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="break-all font-mono text-xs text-blue-600 hover:underline"
+                          >
+                            {selectedCertificate.txHash}
+                          </a>
+                          <CopyButton value={selectedCertificate.txHash} label="transaction hash" />
+                        </div>
                       </div>
                       <div>
                         <span className="mb-1 block text-gray-600">Token / Credential ID:</span>
@@ -688,18 +698,24 @@ export function IssuedCertificatesPage() {
                       </div>
                       <div>
                         <span className="mb-1 block text-gray-600">Student Wallet:</span>
-                        <span className="block break-all font-mono text-xs text-gray-900">{selectedCertificate.walletAddress}</span>
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="break-all font-mono text-xs text-gray-900">{selectedCertificate.walletAddress}</span>
+                          <CopyButton value={selectedCertificate.walletAddress} label="student wallet address" />
+                        </div>
                       </div>
                       <div>
                         <span className="mb-1 block text-gray-600">Contract:</span>
-                        <a
-                          href={`${BLOCK_EXPLORER_URL}/address/${selectedCertificate.contractAddress}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="block break-all font-mono text-xs text-blue-600 hover:underline"
-                        >
-                          {selectedCertificate.contractAddress}
-                        </a>
+                        <div className="flex items-start justify-between gap-2">
+                          <a
+                            href={`${BLOCK_EXPLORER_URL}/address/${selectedCertificate.contractAddress}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="break-all font-mono text-xs text-blue-600 hover:underline"
+                          >
+                            {selectedCertificate.contractAddress}
+                          </a>
+                          <CopyButton value={selectedCertificate.contractAddress} label="contract address" />
+                        </div>
                       </div>
                     </div>
                   ) : (

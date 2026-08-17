@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   CardHeader,
+  CopyButton,
   EmptyState,
   Input,
   Modal,
@@ -535,7 +536,10 @@ export function AdminStudentsPage() {
               </div>
               <div className="sm:col-span-2">
                 <p className="text-sm text-gray-600">System-managed Wallet</p>
-                <p className="break-all font-mono text-xs text-gray-900">{detailStudent.walletAddress || 'Not assigned'}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="break-all font-mono text-xs text-gray-900">{detailStudent.walletAddress || 'Not assigned'}</p>
+                  {detailStudent.walletAddress && <CopyButton value={detailStudent.walletAddress} label="wallet address" />}
+                </div>
               </div>
             </div>
 

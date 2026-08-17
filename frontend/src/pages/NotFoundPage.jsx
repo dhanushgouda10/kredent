@@ -1,4 +1,4 @@
-import { Button } from '../components/ui'
+import { Button, BackButton } from '../components/ui'
 
 export function NotFoundPage() {
   return (
@@ -16,6 +16,9 @@ export function NotFoundPage() {
           <Button to="/verify" variant="outline">
             Verify a Certificate
           </Button>
+        </div>
+        <div className="mt-6">
+          <BackButton label="Go back" fallbackTo="/" className="mx-auto" />
         </div>
       </div>
     </section>

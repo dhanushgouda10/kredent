@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
+import { AnimatePresence, motion } from 'framer-motion'
 import { useAuth } from '../../context/useAuth'
 
 const links = [
@@ -31,17 +33,18 @@ const links = [
   },
 ]
 
-export function StudentSidebar() {
+function SidebarNav({ onNavigate }) {
   const { logout, user } = useAuth()
   const navigate = useNavigate()
 
   const handleLogout = () => {
+    onNavigate?.()
     logout()
     navigate('/')
   }
 
   return (
-    <aside className="flex min-h-full flex-col bg-kredent-navy px-4 py-6 text-white md:w-64 md:flex-shrink-0">
+    <>
       <div className="mb-8 flex items-center gap-3 px-2">
         <img src="/MVJCE_-_New_Logo.png" alt="Kredent logo" className="h-9 w-9 object-contain" />
         <div>
@@ -54,6 +57,7 @@ export function StudentSidebar() {
           <NavLink
             key={link.to}
             to={link.to}
+            onClick={onNavigate}
             className={({ isActive }) =>
               `flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-semibold transition ${
                 isActive
@@ -80,6 +84,74 @@ export function StudentSidebar() {
         </button>
         <div className="text-[11px] text-white/40">Kredent · MVJCE Blockchain System</div>
       </div>
-    </aside>
+    </>
+  )
+}
+
+/** Same mobile-drawer treatment as DashboardSidebar — see that file's comment for why. */
+export function StudentSidebar() {
+  const [isOpen, setIsOpen] = useState(false)
+
+  return (
+    <>
+      <div className="flex items-center justify-between bg-kredent-navy px-4 py-3 text-white md:hidden">
+        <div className="flex items-center gap-2.5">
+          <img src="/MVJCE_-_New_Logo.png" alt="Kredent logo" className="h-8 w-8 object-contain" />
+          <p className="heading-serif text-lg leading-tight">Kredent</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsOpen(true)}
+          aria-label="Open student menu"
+          aria-expanded={isOpen}
+          className="rounded-full p-2 transition hover:bg-white/10 active:scale-95"
+        >
+          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+      </div>
+
+      <aside className="hidden min-h-full flex-col bg-kredent-navy px-4 py-6 text-white md:flex md:w-64 md:flex-shrink-0">
+        <SidebarNav />
+      </aside>
+
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 bg-black/30 md:hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setIsOpen(false)
+            }}
+          >
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 240 }}
+              className="fixed left-0 top-0 flex h-full w-72 max-w-[80vw] flex-col bg-kredent-navy px-4 py-6 text-white shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Student navigation"
+            >
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                aria-label="Close menu"
+                className="mb-4 ml-auto rounded-full p-2 transition hover:bg-white/10"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <SidebarNav onNavigate={() => setIsOpen(false)} />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </>
   )
 }

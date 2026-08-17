@@ -89,11 +89,25 @@ export function Navbar() {
                 <NavLink
                   key={item.to}
                   to={item.to}
+                  end={item.to === '/'}
                   className={({ isActive }) =>
-                    `rounded text-sm font-medium transition hover:text-kredent-accent ${isActive ? 'text-kredent-accent' : ''}`
+                    `relative py-1 text-sm font-medium tracking-wide transition-colors hover:text-kredent-accent ${
+                      isActive ? 'text-kredent-accent' : 'text-white/90'
+                    }`
                   }
                 >
-                  {item.label}
+                  {({ isActive }) => (
+                    <>
+                      {item.label}
+                      {isActive && (
+                        <motion.span
+                          layoutId="navbar-active-underline"
+                          className="absolute -bottom-1 left-0 right-0 h-0.5 rounded-full bg-kredent-accent"
+                          transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+                        />
+                      )}
+                    </>
+                  )}
                 </NavLink>
               ))}
             </nav>
@@ -101,7 +115,7 @@ export function Navbar() {
             <div className="flex items-center gap-3">
               <NavLink
                 to="/admin/login"
-                className="inline-block rounded-full bg-kredent-accent px-6 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-kredent-accent-dark hover:shadow-xl"
+                className="bg-gradient-accent inline-block rounded-full px-6 py-2 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:shadow-xl"
               >
                 Admin Login
               </NavLink>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { Alert, Badge, Button, Card, CardHeader, PageHeader, SkeletonLines } from '../../components/ui'
+import { useParams } from 'react-router-dom'
+import { Alert, BackButton, Badge, Button, Card, CardHeader, CopyButton, PageHeader, SkeletonLines } from '../../components/ui'
 import { downloadCertificateFile, getCertificateById } from '../../services/certificateService'
 import { BLOCK_EXPLORER_URL, NETWORK_NAME } from '../../contracts/skillChainConfig'
 
@@ -15,43 +15,6 @@ function statusMeta(status) {
   return STATUS_META[status] ?? { label: status, variant: 'neutral' }
 }
 
-/** Small copy-to-clipboard icon button used next to each blockchain field. */
-function CopyButton({ value, label }) {
-  const [copied, setCopied] = useState(false)
-  if (!value) return null
-
-  const handleCopy = () => {
-    navigator.clipboard?.writeText(String(value))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      aria-label={`Copy ${label}`}
-      title={copied ? 'Copied!' : `Copy ${label}`}
-      className="ml-2 flex-shrink-0 rounded p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700"
-    >
-      {copied ? (
-        <svg className="h-4 w-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-        </svg>
-      ) : (
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-          />
-        </svg>
-      )}
-    </button>
-  )
-}
-
 /** One label/value row in the blockchain info section, with a copy button when a value is present. */
 function BlockchainRow({ label, value, mono = true, copyable = true }) {
   return (
@@ -63,7 +26,7 @@ function BlockchainRow({ label, value, mono = true, copyable = true }) {
         }`}
       >
         {value ?? '—'}
-        {copyable && <CopyButton value={value} label={label} />}
+        {copyable && <CopyButton value={value} label={label} className="ml-2" />}
       </span>
     </div>
   )
@@ -103,6 +66,7 @@ export function StudentCertificateDetailPage() {
   return (
     <section className="min-h-screen bg-gradient-to-br from-gray-50 to-white py-14 sm:py-16">
       <div className="mx-auto max-w-4xl px-5 lg:px-10">
+        <BackButton label="Back to Certificates" fallbackTo="/student/certificates" className="mb-6" />
         <PageHeader title="Certificate Details" subtitle="Your certificate information and blockchain verification status" />
 
         {loadError && (
@@ -253,10 +217,6 @@ export function StudentCertificateDetailPage() {
                 )}
               </div>
             </Card>
-
-            <Link to="/student/certificates" className="inline-block text-sm font-semibold text-kredent-accent hover:text-orange-700">
-              ← Back to My Certificates
-            </Link>
           </div>
         ) : null}
       </div>
