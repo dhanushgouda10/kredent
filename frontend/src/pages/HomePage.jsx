@@ -62,40 +62,57 @@ export function HomePage() {
       />
 
       {/* Who It's For */}
-      <section className="bg-[#f4f6fb] py-16 sm:py-20">
+      <section className="bg-slate-50/70 py-20 sm:py-28 relative overflow-hidden">
         <div className="mx-auto max-w-[1200px] px-5 lg:px-10">
-          <div className="mx-auto mb-12 max-w-2xl text-center">
-            <p className="mb-3 text-xs font-semibold tracking-[0.3em] text-kredent-accent">BUILT FOR EVERYONE INVOLVED</p>
-            <h2 className="heading-serif text-3xl text-kredent-navy sm:text-4xl">One Platform, Three Roles</h2>
+          <div className="mx-auto mb-16 max-w-2xl text-center">
+            <span className="mb-3 inline-block rounded-full bg-kredent-navy/5 px-4 py-1 text-xs font-bold tracking-[0.25em] text-kredent-accent uppercase border border-kredent-navy/10">
+              BUILT FOR EVERYONE INVOLVED
+            </span>
+            <h2 className="heading-serif mt-2 text-3xl font-extrabold text-kredent-navy sm:text-4xl lg:text-5xl">
+              One Platform, <span className="text-gradient-accent">Three Roles</span>
+            </h2>
+            <p className="mt-4 text-base text-slate-600 sm:text-lg">
+              Tailored features for students, recruiters, and university administration.
+            </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
             {audiences.map((audience, idx) => (
               <motion.div
                 key={audience.label}
-                initial={{ opacity: 0, y: 24 }}
+                initial={{ opacity: 0, y: 30 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ delay: idx * 0.1, duration: 0.5 }}
-                className="flex flex-col rounded-2xl border border-gray-100 bg-white p-7 shadow-[var(--shadow-card)] transition-shadow duration-300 hover:shadow-[var(--shadow-card-hover)]"
+                transition={{ delay: idx * 0.12, duration: 0.5 }}
+                whileHover={{ y: -8 }}
+                className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-8 shadow-[var(--shadow-card)] transition-all duration-300 hover:border-kredent-accent/40 hover:shadow-[var(--shadow-card-hover)] relative"
               >
-                <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-kredent-navy/10 text-kredent-navy">
+                {/* Top Accent Line */}
+                <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-kredent-navy via-kredent-accent to-kredent-navy opacity-80 group-hover:opacity-100 transition-opacity" />
+
+                <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-kredent-navy to-kredent-navy-deep text-white shadow-md transition-transform duration-300 group-hover:scale-110">
                   {audience.icon}
                 </div>
-                <p className="mb-1 text-xs font-semibold tracking-wider text-kredent-accent">{audience.label.toUpperCase()}</p>
-                <h3 className="mb-3 font-serif text-xl font-bold text-kredent-navy">{audience.title}</h3>
-                <p className="mb-5 flex-1 text-sm leading-relaxed text-gray-600">{audience.description}</p>
-                <ul className="mb-6 space-y-2">
+                <p className="mb-1 text-xs font-bold tracking-widest text-kredent-accent uppercase">{audience.label}</p>
+                <h3 className="mb-3 font-serif text-2xl font-bold text-kredent-navy group-hover:text-kredent-accent transition-colors">
+                  {audience.title}
+                </h3>
+                <p className="mb-6 flex-1 text-sm leading-relaxed text-slate-600">{audience.description}</p>
+                
+                <ul className="mb-8 space-y-2.5 border-t border-slate-100 pt-6">
                   {audience.points.map((point) => (
-                    <li key={point} className="flex items-start gap-2 text-sm text-gray-700">
-                      <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-kredent-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                      {point}
+                    <li key={point} className="flex items-start gap-2.5 text-sm text-slate-700">
+                      <div className="mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                      <span className="font-medium">{point}</span>
                     </li>
                   ))}
                 </ul>
-                <Button to={audience.action.to} variant="outline" className="mt-auto">
+
+                <Button to={audience.action.to} variant="outline" className="mt-auto group-hover:bg-kredent-navy group-hover:text-white transition-colors">
                   {audience.action.label}
                 </Button>
               </motion.div>
@@ -110,3 +127,4 @@ export function HomePage() {
     </>
   )
 }
+

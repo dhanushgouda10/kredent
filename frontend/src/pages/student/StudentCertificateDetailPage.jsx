@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Alert, BackButton, Badge, Button, Card, CardHeader, CopyButton, PageHeader, SkeletonLines } from '../../components/ui'
+import { Alert, BackButton, Badge, Breadcrumbs, Button, Card, CardHeader, CopyButton, PageHeader, SkeletonLines } from '../../components/ui'
 import { downloadCertificateFile, getCertificateById } from '../../services/certificateService'
 import { BLOCK_EXPLORER_URL, NETWORK_NAME } from '../../contracts/skillChainConfig'
 
@@ -66,6 +66,13 @@ export function StudentCertificateDetailPage() {
   return (
     <section className="min-h-screen bg-gradient-to-br from-gray-50 to-white py-14 sm:py-16">
       <div className="mx-auto max-w-4xl px-5 lg:px-10">
+        <Breadcrumbs
+          items={[
+            { label: 'Dashboard', to: '/student/dashboard' },
+            { label: 'My Certificates', to: '/student/certificates' },
+            { label: cert?.certificateNumber ?? 'Certificate Detail' },
+          ]}
+        />
         <BackButton label="Back to Certificates" fallbackTo="/student/certificates" className="mb-6" />
         <PageHeader title="Certificate Details" subtitle="Your certificate information and blockchain verification status" />
 

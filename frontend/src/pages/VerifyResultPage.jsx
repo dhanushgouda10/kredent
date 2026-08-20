@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Alert, BackButton, Button, Card, PageHeader, SkeletonLines } from '../components/ui'
+import { Alert, BackButton, Breadcrumbs, Button, Card, PageHeader, SkeletonLines } from '../components/ui'
 import { verifyCertificate, verifyCertificatePdf } from '../services/verificationService'
 import { BLOCK_EXPLORER_URL } from '../contracts/skillChainConfig'
 
@@ -140,6 +140,13 @@ export function VerifyResultPage() {
   return (
     <section className="min-h-screen bg-gradient-to-br from-gray-50 to-white py-14 sm:py-16">
       <div className="mx-auto max-w-2xl px-5 lg:px-10">
+        <Breadcrumbs
+          items={[
+            { label: 'Home', to: '/' },
+            { label: 'Verify Degree', to: '/verify' },
+            { label: certificateNumber },
+          ]}
+        />
         <BackButton label="Back to Verification" fallbackTo="/verify" className="mb-6" />
         <PageHeader title="Kredent Certificate Verification" subtitle={`Certificate Number: ${certificateNumber}`} />
 
